@@ -17,7 +17,7 @@ const ProgramCreator: React.FC<{
     users: User[];
     squads: Squad[];
     drills: Drill[];
-    onSave: (p: Partial<Program>, recipients: string[]) => void;
+    onSave: (p: Partial<Program>, recipients: string[], isSquadProgram: boolean) => void;
     programs: Program[];
 }> = ({ user, users, squads, drills, onSave, programs }) => {
     const navigate = useNavigate();
@@ -44,7 +44,7 @@ const ProgramCreator: React.FC<{
     const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<{ sessionIndex: number, itemIndex: number, item: ProgramItem } | null>(null);
 
-    const isSquadContext = location.state?.squad || squads.some(s => targetIds.includes(s.id));
+    const isSquadContext = location.state?.squad;
     
     const handleGenerate = async () => {
         setIsGenerating(true);
@@ -69,7 +69,7 @@ const ProgramCreator: React.FC<{
 
     const handleSave = () => {
         if (programForEditing) {
-            onSave(programForEditing, targetIds);
+            onSave(programForEditing, targetIds, !!isSquadContext);
             if (user.role === UserRole.PLAYER) {
                 navigate('/');
             } else {
@@ -250,7 +250,7 @@ const ProgramCreator: React.FC<{
                                 <div key={i} className="bg-brand-surface p-4 rounded-xl border border-slate-200">
                                     <h3 className="font-bold text-lg text-slate-900">{p.title}</h3>
                                     <p className="text-sm text-slate-500 mb-4">{p.description}</p>
-                                    <Button fullWidth variant="secondary" onClick={() => { onSave(p, [user.id]); navigate('/'); }}>Add to My Plans</Button>
+                                    <Button fullWidth variant="secondary" onClick={() => { onSave(p, [user.id], false); navigate('/'); }}>Add to My Plans</Button>
                                 </div>
                             ))}
                         </div>

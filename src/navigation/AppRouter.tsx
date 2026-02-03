@@ -98,9 +98,11 @@ const AppRouter: React.FC = () => {
     handleUpdateUser(updatedUser);
   };
 
-    const handleSaveProgram = (programData: Partial<Program>, recipients: string[]) => {
+    const handleSaveProgram = (programData: Partial<Program>, recipients: string[], isSquadProgram: boolean) => {
         if (!user) return;
         setSuggestedProgram(null);
+
+        // Player self-assigning a program
         if (user.role === UserRole.PLAYER) {
             const newProgram: Program = {
                 ...programData,
@@ -116,39 +118,12 @@ const AppRouter: React.FC = () => {
             setPrograms(prev => [...prev, newProgram]);
             return;
         }
+        
+        const newPrograms: Program[] = [];
+        const newNotifications: Notification[] = [];
 
-        if (recipients.length > 0) {
-            const newPrograms: Program[] = [];
-            recipients.forEach(rId => {
-                const isSquad = squads.some(s => s.id === rId);
-                if (isSquad) {
-                     newPrograms.push({
-                        ...programData,
-                        id: Math.random().toString(36).substr(2, 9),
-                        assignedBy: user.id,
-                        assignedTo: rId,
-                        createdAt: new Date().toISOString(),
-                        completed: false,
-                        status: ProgramStatus.ACCEPTED,
-                        isTemplate: false,
-                        sessions: programData.sessions?.map(s => ({ ...s, id: Math.random().toString(36).substr(2, 9), completed: false })) || []
-                    } as Program);
-                } else {
-                    newPrograms.push({
-                        ...programData,
-                        id: Math.random().toString(36).substr(2, 9),
-                        assignedBy: user.id,
-                        assignedTo: rId,
-                        createdAt: new Date().toISOString(),
-                        completed: false,
-                        status: ProgramStatus.PENDING,
-                        isTemplate: false,
-                        sessions: programData.sessions?.map(s => ({ ...s, id: Math.random().toString(36).substr(2, 9), completed: false })) || []
-                    } as Program);
-                }
-            });
-            setPrograms(prev => [...prev, ...newPrograms]);
-        } else {
+        // Coach saving as a template (no recipients)
+        if (recipients.length === 0) {
             const newTemplate: Program = {
                 ...programData,
                 id: Math.random().toString(36).substr(2, 9),
@@ -161,7 +136,79 @@ const AppRouter: React.FC = () => {
                 sessions: programData.sessions?.map(s => ({ ...s, id: Math.random().toString(36).substr(2, 9), completed: false })) || []
             } as Program;
             setPrograms(prev => [...prev, newTemplate]);
+            return;
         }
+
+        // Coach assigning to players/squads
+        recipients.forEach(rId => {
+            const isTargetSquad = squads.some(s => s.id === rId);
+
+            // This is a SQUAD PROGRAM (coach-led, synchronous)
+            if (isSquadProgram) {
+                if (!isTargetSquad) return;
+                const squad = squads.find(s => s.id === rId)!;
+                const squadProgram: Program = {
+                    ...programData,
+                    id: Math.random().toString(36).substr(2, 9),
+                    assignedBy: user.id,
+                    assignedTo: rId,
+                    createdAt: new Date().toISOString(),
+                    completed: false,
+                    status: ProgramStatus.ACCEPTED,
+                    isTemplate: false,
+                    sessions: programData.sessions?.map(s => ({ ...s, id: Math.random().toString(36).substr(2, 9), completed: false })) || []
+                } as Program;
+                newPrograms.push(squadProgram);
+                
+                squad.memberIds.forEach(memberId => {
+                    newNotifications.push({
+                        id: `notif_${Date.now()}_${memberId}`,
+                        userId: memberId,
+                        type: 'PROGRAM_UPDATE',
+                        title: 'New Squad Session Planned',
+                        message: `Coach ${user.name} scheduled "${programData.title}" for ${squad.name}.`,
+                        relatedId: squadProgram.id,
+                        read: false,
+                        date: new Date().toISOString(),
+                    });
+                });
+            }
+            // This is a PLAYER PROGRAM (player-led, asynchronous)
+            else {
+                const playersToAssign = isTargetSquad
+                    ? squads.find(s => s.id === rId)!.memberIds
+                    : [rId];
+
+                playersToAssign.forEach(playerId => {
+                    const newProg: Program = {
+                        ...programData,
+                        id: Math.random().toString(36).substr(2, 9),
+                        assignedBy: user.id,
+                        assignedTo: playerId,
+                        createdAt: new Date().toISOString(),
+                        completed: false,
+                        status: ProgramStatus.PENDING,
+                        isTemplate: false,
+                        sessions: programData.sessions?.map(s => ({ ...s, id: Math.random().toString(36).substr(2, 9), completed: false })) || []
+                    } as Program;
+                    newPrograms.push(newProg);
+
+                    newNotifications.push({
+                        id: `notif_${Date.now()}_${playerId}`,
+                        userId: playerId,
+                        type: 'PROGRAM_ASSIGNED',
+                        title: 'New Program Assigned',
+                        message: `Coach ${user.name} assigned you "${programData.title}".`,
+                        relatedId: newProg.id,
+                        read: false,
+                        date: new Date().toISOString(),
+                    });
+                });
+            }
+        });
+        
+        setPrograms(prev => [...prev, ...newPrograms]);
+        setNotifications(prev => [...prev, ...newNotifications]);
     };
 
     const handleUpdateSquadSession = (programId: string, oldSessionId: string, newSession: ProgramSession) => {
@@ -303,7 +350,7 @@ const AppRouter: React.FC = () => {
             <Route path="/coach/create" element={<CoachCreationMenu />} />
             
             <Route path="/create-program" element={
-                <ProgramCreator user={user!} users={users} squads={squads} drills={drills} onSave={handleSaveProgram} programs={programs} />
+                <ProgramCreator user={user!} users={users} squads={squads} drills={drills} onSave={(p, r, isSquad) => handleSaveProgram(p, r, isSquad)} programs={programs} />
             } />
             
             <Route path="/program/:programId" element={
