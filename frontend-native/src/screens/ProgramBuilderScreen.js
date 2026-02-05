@@ -23,10 +23,11 @@ const PREMADE_PROGRAMS = [
 ];
 
 export default function ProgramBuilderScreen({ navigation, route }) {
-  const { squadMode } = route.params || {}; 
+  
+  const { squadMode, initialPrompt, autoStart } = route.params || {};
 
-  const [step, setStep] = useState(squadMode ? 1 : 0); 
-  const [creationMethod, setCreationMethod] = useState(null); 
+  const [step, setStep] = useState(autoStart ? 1 : (squadMode ? 1 : 0)); 
+  const [creationMethod, setCreationMethod] = useState(autoStart ? 'AI' : null);
   
   // User Context
   const [userRole, setUserRole] = useState('PLAYER'); 
@@ -42,7 +43,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   ]);
 
   // Form State
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initialPrompt || '');
   const [durationWeeks, setDurationWeeks] = useState('4');
   const [draftProgram, setDraftProgram] = useState({ title: '', description: '', sessions: [] });
   const [selectedTargets, setSelectedTargets] = useState([]);

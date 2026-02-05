@@ -10,6 +10,7 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import TeamScreen from './src/screens/TeamScreen';
 import DrillLibraryScreen from './src/screens/DrillLibraryScreen';
 import ProgramDetailScreen from './src/screens/ProgramDetailScreen';
+import AssessmentScreen from './src/screens/AssessmentScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -72,6 +73,12 @@ export default function App() {
           name="ProgramDetail" 
           component={ProgramDetailScreen} 
           options={{ headerTitle: 'Program Details', headerBackTitle: 'Back' }} 
+        />
+        
+        <Stack.Screen 
+          name="Assessment" 
+          component={AssessmentScreen} 
+          options={{ headerShown: false }} 
         />
 
       </Stack.Navigator>

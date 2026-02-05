@@ -116,12 +116,10 @@ export default function SessionScreen({ route, navigation }) {
 
   const saveSession = async () => {
     try {
-      // 1. Calculate Duration
       const endTime = new Date();
       const startTime = sessionStartTime || endTime;
       const duration = Math.round((endTime - startTime) / 60000) || 1;
 
-      // 2. Prepare Payload (Robust ID Check)
       const safeLogs = drillLogs.map(log => ({
           ...log,
           drill_id: log.drill_id || "unknown_drill" 
@@ -136,23 +134,19 @@ export default function SessionScreen({ route, navigation }) {
         drill_performances: safeLogs
       };
 
-      console.log("Saving Session...", JSON.stringify(payload));
-
-      // 3. Send to Backend
+      console.log("Saving Session...");
       await api.post('/sessions', payload);
       
-      // 4. ✅ FIX: Navigate IMMEDIATELY (Don't wait for the Alert)
-      // We go to Main -> Progress tab so the user sees their XP update
+      // ✅ FIX: Navigate IMMEDIATELY (Don't wait for Alert)
       navigation.navigate('Main', { screen: 'Progress' });
 
-      // 5. Show Success Feedback (This will appear over the Progress screen)
-      // Using a small timeout ensures the navigation animation starts first
+      // Show success after navigation starts
       setTimeout(() => {
         Alert.alert("Great Job!", "Session saved! XP Earned.");
       }, 500);
 
     } catch (error) {
-      console.error("Save Error:", error?.response?.data || error);
+      console.error("Save Error:", error);
       Alert.alert("Error", "Could not save session. Please try again.");
     }
   };

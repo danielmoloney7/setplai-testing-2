@@ -6,15 +6,17 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, CheckCircle, PlayCircle } from 'lucide-react-native'; // ✅ Added CheckCircle, PlayCircle
+import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList } from 'lucide-react-native';
 
-import { fetchPrograms, fetchSessionLogs } from '../services/api'; // ✅ Fetch Programs AND Logs
+import { fetchPrograms, fetchSessionLogs } from '../services/api'; 
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function DashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState({ name: 'Athlete', role: 'PLAYER' }); 
-  const [nextSession, setNextSession] = useState(null);
+  
+  // ✅ CHANGED: Now an array to hold multiple sessions
+  const [upNextSessions, setUpNextSessions] = useState([]); 
   const [pendingCount, setPendingCount] = useState(0);
 
   // --- DATA LOADING ---
@@ -46,7 +48,9 @@ export default function DashboardScreen({ navigation }) {
             );
             
             console.log(`Dashboard Debug: Found ${active.length} active programs.`);
-            calculateNextSession(active, myLogs);
+            
+            // ✅ CHANGED: Calculate for ALL active programs
+            calculateNextSessions(active, myLogs);
         }
     } catch (error) {
         console.log("Dashboard Error:", error);
@@ -59,15 +63,14 @@ export default function DashboardScreen({ navigation }) {
     useCallback(() => { loadDashboard(); }, [])
   );
 
-  // --- LOGIC: FIND NEXT SESSION ---
-  const calculateNextSession = (activePrograms, logs) => {
-      // 1. Safety Check
+  // --- LOGIC: FIND NEXT SESSIONS (ALL PROGRAMS) ---
+  const calculateNextSessions = (activePrograms, logs) => {
       if (!activePrograms || activePrograms.length === 0) {
-          setNextSession(null);
+          setUpNextSessions([]);
           return;
       }
 
-      // 2. Sort by Newest First
+      // Sort by Newest First
       const sortedPrograms = activePrograms.sort((a, b) => {
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -75,52 +78,45 @@ export default function DashboardScreen({ navigation }) {
           return (parseInt(b.id) || 0) - (parseInt(a.id) || 0);
       });
 
-      const priorityProgram = sortedPrograms[0];
-      const rawSchedule = priorityProgram.schedule || priorityProgram.sessions || [];
-      
-      if (rawSchedule.length === 0) {
-          setNextSession(null);
-          return;
-      }
+      const upcoming = [];
 
-      // 3. ✅ SMART FILTER: Check Logs for Completed Days
-      const completedDays = logs
-          .filter(log => log.program_id === priorityProgram.id)
-          .map(log => log.session_id); // session_id stores the day_order
+      // ✅ Loop through ALL active programs
+      sortedPrograms.forEach(program => {
+          const rawSchedule = program.schedule || program.sessions || [];
+          if (rawSchedule.length === 0) return;
 
-      console.log(`Program: ${priorityProgram.title} | Completed Days: ${completedDays}`);
+          // 1. Check Logs for Completed Days for THIS program
+          const completedDays = logs
+              .filter(log => log.program_id === program.id)
+              .map(log => log.session_id);
 
-      // 4. Find the first drill belonging to a day NOT in completedDays
-      const nextDrill = rawSchedule.find(item => !completedDays.includes(item.day_order));
+          // 2. Find first incomplete day
+          const nextDrill = rawSchedule.find(item => !completedDays.includes(item.day_order));
 
-      // 5. Check for Completion
-      if (!nextDrill) {
-          setNextSession({ 
-              isComplete: true, 
-              programTitle: priorityProgram.title 
-          });
-          return;
-      }
+          // 3. If found, add to list
+          if (nextDrill) {
+              const nextDayNum = nextDrill.day_order;
+              const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
+              const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes) || 0), 0);
 
-      // 6. Group all drills for that specific Day
-      const nextDayNum = nextDrill.day_order;
-      const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
-      const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes) || 0), 0);
-
-      setNextSession({
-          isComplete: false,
-          title: `Day ${nextDayNum} Training`, 
-          programTitle: priorityProgram.title,
-          duration: totalMins > 0 ? totalMins : 45,
-          drillCount: sessionDrills.length,
-          programId: priorityProgram.id,
-          fullSessionData: {
-              day_order: nextDayNum,
-              title: `Day ${nextDayNum}`,
-              items: sessionDrills,
-              totalMinutes: totalMins
+              upcoming.push({
+                  uniqueId: `${program.id}_day_${nextDayNum}`, // React key
+                  title: `Day ${nextDayNum} Training`, 
+                  programTitle: program.title,
+                  duration: totalMins > 0 ? totalMins : 45,
+                  drillCount: sessionDrills.length,
+                  programId: program.id,
+                  fullSessionData: {
+                      day_order: nextDayNum,
+                      title: `Day ${nextDayNum}`,
+                      items: sessionDrills,
+                      totalMinutes: totalMins
+                  }
+              });
           }
       });
+
+      setUpNextSessions(upcoming);
   };
 
   const getInitials = (n) => n ? n[0].toUpperCase() : 'U';
@@ -152,6 +148,23 @@ export default function DashboardScreen({ navigation }) {
 
   const renderPlayerView = () => (
     <View style={styles.playerContainer}>
+        {/* 0. Assessment Call-to-Action */}
+        <TouchableOpacity 
+            style={[styles.inviteBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD' }]}
+            onPress={() => navigation.navigate('Assessment')}
+        >
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
+                <View style={[styles.notifIcon, { backgroundColor: '#E0F2FE' }]}>
+                    <ClipboardList size={20} color="#0284C7" />
+                </View>
+                <View>
+                    <Text style={[styles.inviteTitle, { color: '#0369A1' }]}>Find Your Baseline</Text>
+                    <Text style={[styles.inviteSub, { color: '#0284C7' }]}>Take the 2-min skill assessment.</Text>
+                </View>
+            </View>
+            <ChevronRight size={20} color="#0284C7" />
+        </TouchableOpacity>
+
         {/* 1. Pending Invites Notification */}
         {pendingCount > 0 && (
             <TouchableOpacity 
@@ -169,55 +182,48 @@ export default function DashboardScreen({ navigation }) {
             </TouchableOpacity>
         )}
 
-        {/* 2. Next Up Card */}
+        {/* 2. Next Up Cards (List of Active Sessions) */}
         <Text style={[styles.sectionHeader, { paddingHorizontal: 24 }]}>Up Next</Text>
         <View style={{ paddingHorizontal: 24 }}>
-          {nextSession ? (
-            nextSession.isComplete ? (
-                // ✅ Program Complete State
-                <View style={styles.completeCard}>
-                    <CheckCircle size={40} color="#22C55E" style={{marginBottom: 8}} />
-                    <Text style={styles.cardTitle}>Program Complete!</Text>
-                    <Text style={styles.cardSub}>You finished {nextSession.programTitle}. Time to start a new plan?</Text>
-                </View>
-            ) : (
-                // ✅ Normal Next Session State
+          {upNextSessions.length > 0 ? (
+            upNextSessions.map((sessionItem) => (
                 <TouchableOpacity 
-                    style={styles.upNextCard} 
+                    key={sessionItem.uniqueId}
+                    style={styles.upNextCard} // Uses marginBottom from style
                     activeOpacity={0.9} 
                     onPress={() => navigation.navigate('Session', { 
-                        session: nextSession.fullSessionData, 
-                        programId: nextSession.programId 
+                        session: sessionItem.fullSessionData, 
+                        programId: sessionItem.programId 
                     })}
                 >
                   <View style={styles.upNextHeader}>
-                    <View style={styles.tag}><Text style={styles.tagText}>TODAY</Text></View>
-                    <View style={styles.planBadge}><Text style={styles.planBadgeText}>My Plan</Text></View>
+                    <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
+                    <View style={styles.planBadge}><Text style={styles.planBadgeText}>Active Plan</Text></View>
                   </View>
                   
                   <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
-                      <View>
-                        <Text style={styles.upNextTitle}>{nextSession.title}</Text>
-                        <Text style={styles.upNextSubtitle}>{nextSession.programTitle}</Text>
+                      <View style={{flex: 1, marginRight: 12}}>
+                        <Text style={styles.upNextTitle}>{sessionItem.title}</Text>
+                        <Text style={styles.upNextSubtitle}>{sessionItem.programTitle}</Text>
                         
                         <View style={styles.metaRow}>
                             <View style={styles.metaItem}>
-                            <Clock size={14} color="#64748B" />
-                            <Text style={styles.metaText}>{nextSession.duration} min</Text>
+                                <Clock size={14} color="#64748B" />
+                                <Text style={styles.metaText}>{sessionItem.duration} min</Text>
                             </View>
                             <View style={styles.metaItem}>
-                            <Dumbbell size={14} color="#64748B" />
-                            <Text style={styles.metaText}>{nextSession.drillCount} Drills</Text>
+                                <Dumbbell size={14} color="#64748B" />
+                                <Text style={styles.metaText}>{sessionItem.drillCount} Drills</Text>
                             </View>
                         </View>
                       </View>
                       <PlayCircle size={32} color={COLORS.primary} fill="#E0F2FE" style={{marginTop: 4}}/>
                   </View>
                 </TouchableOpacity>
-            )
+            ))
           ) : (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>No active plan.</Text>
+              <Text style={styles.emptyText}>No active sessions.</Text>
               <Text style={styles.subText}>Check your invites or create a new plan!</Text>
             </View>
           )}
@@ -291,18 +297,23 @@ const styles = StyleSheet.create({
   sectionHeader: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12, marginTop: 8, paddingHorizontal: 24 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 16 },
   section: { marginBottom: 24, paddingHorizontal: 24 },
+  
+  // Banners
   inviteBanner: { backgroundColor: '#FFF7ED', marginHorizontal: 24, marginBottom: 24, padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#FED7AA' },
   notifIcon: { width: 40, height: 40, backgroundColor: '#FFEDD5', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   inviteTitle: { fontSize: 15, fontWeight: '700', color: '#9A3412' },
   inviteSub: { fontSize: 13, color: '#C2410C' },
+  
   horizontalScroll: { marginBottom: 24, marginHorizontal: 0 },
+  
+  // Quick Card
   quickCard: { backgroundColor: '#FFF', width: 160, padding: 16, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   quickTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
   quickDesc: { fontSize: 12, color: '#64748B', lineHeight: 16 },
   
   // Up Next Styles
-  upNextCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium },
+  upNextCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium, marginBottom: 16 },
   upNextHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   tag: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   tagText: { fontSize: 11, fontWeight: '700', color: '#64748B', textTransform: 'uppercase' },
