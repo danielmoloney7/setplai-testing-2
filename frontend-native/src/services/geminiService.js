@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 
 // ⚠️ REPLACE THIS WITH YOUR ACTUAL API KEY
 // In production, use standard React Native env variables (e.g. EXPO_PUBLIC_GEMINI_API_KEY)
-const API_KEY = "AIzaSyC7_K89UQhzn2txod1cqyWR7bAs6lUdTdM"; 
+const API_KEY = ""; 
 
 const getDrillKnowledgeBase = (drills) => {
   return drills.map(d => `${d.id}: ${d.name} (${d.category}, ${d.difficulty}) - ${d.description}`).join('\n');
