@@ -5,13 +5,14 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { CommonActions } from '@react-navigation/native'; // ✅ IMPORT THIS
 import { 
   ChevronLeft, Check, Users, User, ChevronRight, 
   Wand2, Layers, Edit2, PlayCircle
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
-// ✅ FIXED: Imported createProgram
+// Import API services
 import { fetchMyTeam, fetchDrills, createProgram } from '../services/api'; 
 import { generateAIProgram } from '../services/geminiService';
 
@@ -65,9 +66,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
   // --- LOGIC: GENERATION ---
   const handleGenerate = async () => {
-    if (availableDrills.length === 0) {
-        // Fallback or empty logic
-    }
     if (!prompt.trim()) return Alert.alert("Required", "Please describe your goal.");
 
     setLoading(true);
@@ -96,55 +94,71 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     }
   };
 
-  // --- LOGIC: SAVE & REDIRECT (FIXED) ---
+  // --- LOGIC: SAVE & REDIRECT (ROBUST) ---
   const handleFinalize = async (targets) => {
     console.log("Finalizing program for targets:", targets);
     setLoading(true);
 
     try {
-        // 1. Construct Payload matching Backend Pydantic Schema
+        // 1. Prepare Payload
         const payload = {
             title: draftProgram.title,
             description: draftProgram.description || "",
-            // If player, they auto-activate. If coach, it's pending.
             status: userRole === 'PLAYER' ? 'ACTIVE' : 'PENDING', 
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
-                drills: (s.items || []).map(item => ({
-                    drill_name: item.drillId || item.drill_name || "Drill",
-                    duration: parseInt(item.duration || 15),
-                    notes: item.notes || ""
-                }))
+                drills: (s.items || []).map(item => {
+                    // ✅ LOOKUP REAL DRILL NAME (Fixes "d9" display issue)
+                    const realDrill = availableDrills.find(d => d.id === (item.drillId || item.id));
+                    const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Drill");
+
+                    return {
+                        drill_id: item.drillId || item.id, 
+                        drill_name: prettyName, 
+                        duration: parseInt(item.duration || item.targetDurationMin || 15),
+                        notes: item.notes || ""
+                    };
+                })
             }))
         };
 
-        console.log("Sending Payload to DB:", JSON.stringify(payload, null, 2));
+        console.log("Sending Payload...", JSON.stringify(payload, null, 2));
 
-        // 2. Call API to Save to Database
+        // 2. Call API
         await createProgram(payload);
-        
-        console.log("SUCCESS: Program Saved to DB");
+        console.log("SUCCESS: Program Saved");
 
-        // 3. Navigate & Alert
+        // 3. ROBUST NAVIGATION RESET (Fixes the button issue)
         setLoading(false);
         
-        if (userRole === 'PLAYER') {
-            // ✅ Navigate directly to the Plans Tab
-            navigation.navigate('Main', { screen: 'Plans' });
-            Alert.alert("Success", "Plan started! Check your Plans tab.");
-        } else {
-            // ✅ Navigate to Programs Tab for Coach
-            navigation.navigate('Main', { screen: 'Programs' });
-            Alert.alert("Success", "Program assigned!", [
-                { text: "OK" } 
-            ]);
-        }
+        // Define where we want to land
+        const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
+        
+        // Use reset to force a clean slate transition
+        navigation.dispatch(
+            CommonActions.reset({
+                index: 0,
+                routes: [
+                    {
+                        name: 'Main',
+                        state: {
+                            routes: [{ name: targetTab }],
+                        },
+                    },
+                ],
+            })
+        );
+        
+        // Optional: Show Success Message (Small delay to allow nav to start)
+        setTimeout(() => {
+            Alert.alert("Success", userRole === 'PLAYER' ? "Plan started!" : "Program assigned!");
+        }, 500);
 
     } catch (e) {
         console.error("Save Error:", e);
         setLoading(false);
-        Alert.alert("Error", "Could not save to database. Check connection.");
+        Alert.alert("Error", "Could not save program. Please check your connection.");
     }
   };
 

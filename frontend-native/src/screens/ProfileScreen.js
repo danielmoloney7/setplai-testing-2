@@ -1,43 +1,67 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  Image, Switch, Alert, ActivityIndicator 
+  RefreshControl, Alert
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Edit2, Link as LinkIcon, Check, Zap, Target } from 'lucide-react-native';
+import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { updateProfile } from '../services/api';
+import { updateProfile, fetchUserProfile } from '../services/api';
 
 const COMMON_GOALS = ['Improve Serve', 'Consistency', 'Strategy', 'Fitness', 'Mental Game', 'Power', 'Footwork'];
 const SKILL_LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
 
 export default function ProfileScreen({ navigation }) {
-  const [user, setUser] = useState({ name: 'Loading...', role: 'PLAYER', level: 'Intermediate', goals: [], connectedDevices: [] });
+  const [user, setUser] = useState({ 
+    name: 'Loading...', 
+    role: 'PLAYER', 
+    level: 'Intermediate', 
+    goals: [], 
+    xp: 0,
+    connectedDevices: [] 
+  });
+  
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    loadUser();
-  }, []);
-
+  // Load User Data
   const loadUser = async () => {
-    const name = await AsyncStorage.getItem('user_name');
-    const role = await AsyncStorage.getItem('user_role');
-    // Default data for visual testing if API fails
-    setUser({ 
-      name: name || 'Rafael N.', 
-      role: (role || 'PLAYER').toUpperCase(), 
-      level: 'Advanced',
-      goals: ['Power', 'Serve'],
-      connectedDevices: []
-    });
+    setLoading(true);
+    try {
+        const data = await fetchUserProfile();
+        if (data) {
+            // Normalize role to uppercase for consistent checking
+            const normalizedUser = {
+                ...data,
+                role: (data.role || 'PLAYER').toUpperCase(),
+                goals: typeof data.goals === 'string' ? data.goals.split(',') : (data.goals || [])
+            };
+            setUser(normalizedUser);
+        }
+    } catch (e) {
+        console.log("Profile Load Error:", e);
+    } finally {
+        setLoading(false);
+    }
   };
 
-  const handleUpdate = (updates) => {
+  useFocusEffect(useCallback(() => { loadUser(); }, []));
+
+  // Handle Updates
+  const handleUpdate = async (updates) => {
+    // Optimistic UI Update
     setUser(prev => ({ ...prev, ...updates }));
-    // In a real app, you would debounce this call to the API
-    if (updates.goals) updateProfile(updates.goals).catch(err => console.log(err));
+    
+    // API Call
+    if (updates.goals || updates.level) {
+        try {
+            await updateProfile(updates.goals || user.goals); // Simplified update for now
+        } catch(e) {
+            Alert.alert("Error", "Could not save profile changes.");
+        }
+    }
   };
 
   const toggleGoal = (goal) => {
@@ -51,28 +75,41 @@ export default function ProfileScreen({ navigation }) {
 
   const handleLogout = async () => {
     await AsyncStorage.clear();
-    navigation.replace('Login');
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Login' }],
+    });
   };
 
-  // --- 1. Header Section ---
+  // --- RENDERERS ---
+
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.avatarContainer}>
-        {/* Placeholder Avatar - Replace with user.avatar if available */}
-        <Text style={styles.avatarText}>{user.name[0]}</Text>
+        <Text style={styles.avatarText}>{user.name ? user.name[0].toUpperCase() : 'U'}</Text>
       </View>
       <Text style={styles.name}>{user.name}</Text>
-      <View style={styles.roleBadge}>
-        <Text style={styles.roleText}>{user.role}</Text>
+      
+      <View style={{flexDirection: 'row', gap: 8, marginTop: 8}}>
+          {/* Role Badge */}
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleText}>{user.role}</Text>
+          </View>
+
+          {/* ✅ XP Badge (PLAYER ONLY) */}
+          {user.role === 'PLAYER' && (
+            <View style={[styles.roleBadge, { backgroundColor: '#FEF9C3' }]}>
+                <Trophy size={12} color="#CA8A04" style={{marginRight:4}}/>
+                <Text style={[styles.roleText, { color: '#CA8A04' }]}>{user.xp || 0} XP</Text>
+            </View>
+          )}
       </View>
     </View>
   );
 
-  // --- 2. Player Settings (The "Cards") ---
   const renderPlayerSettings = () => (
     <View style={{ gap: 16 }}>
-      
-      {/* Skill Level Card */}
+      {/* Skill Level */}
       <View style={styles.card}>
         <View style={styles.cardTitleRow}>
           <Target size={20} color={COLORS.primary} />
@@ -94,7 +131,7 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Goals Card */}
+      {/* Goals */}
       <View style={styles.card}>
         <View style={styles.cardTitleRow}>
           <Zap size={20} color={COLORS.primary} />
@@ -107,8 +144,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={styles.goalsContainer}>
           {COMMON_GOALS.map(goal => {
             const isSelected = user.goals?.includes(goal);
-            // Only show selected goals unless editing
-            if (!isEditing && !isSelected) return null;
+            if (!isEditing && !isSelected) return null; // Hide unselected when not editing
 
             return (
               <TouchableOpacity 
@@ -128,41 +164,42 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Connected Devices Card */}
+      {/* Connected Devices */}
       <View style={styles.card}>
         <View style={styles.cardTitleRow}>
           <LinkIcon size={20} color={COLORS.primary} />
           <Text style={styles.cardTitle}>Connected Devices</Text>
         </View>
-        {user.connectedDevices?.length > 0 ? (
-           <View style={styles.connectedRow}>
-              <View>
-                  <Text style={styles.deviceText}>Smartwatch Connected</Text>
-                  <Text style={styles.deviceSub}>Syncing heart rate & calories</Text>
-              </View>
-              <TouchableOpacity onPress={() => handleUpdate({ connectedDevices: [] })} style={styles.disconnectBtn}>
-                  <Text style={styles.disconnectText}>Disconnect</Text>
-              </TouchableOpacity>
-           </View>
-        ) : (
-            <TouchableOpacity 
-                style={styles.connectBtn}
-                onPress={() => handleUpdate({ connectedDevices: ['Smartwatch'] })}
-            >
-                <Text style={styles.connectBtnText}>Connect Smartwatch</Text>
-            </TouchableOpacity>
-        )}
+        <TouchableOpacity 
+            style={styles.connectBtn}
+            onPress={() => Alert.alert("Demo", "Wearable connection simulated.")}
+        >
+            <Text style={styles.connectBtnText}>Connect Smartwatch</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadUser} />}
+      >
         
         {renderHeader()}
 
+        {/* ✅ CONDITIONAL RENDER: Only Players see gamification/goals */}
         {user.role === 'PLAYER' && renderPlayerSettings()}
+
+        {/* Coach Empty State */}
+        {user.role === 'COACH' && (
+            <View style={styles.emptyContainer}>
+                <UserIcon size={48} color="#CBD5E1" />
+                <Text style={styles.emptyText}>Coach profile active.</Text>
+                <Text style={styles.emptySubText}>Manage your athletes from the Team tab.</Text>
+            </View>
+        )}
 
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <LogOut size={20} color="#EF4444" />
@@ -178,7 +215,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   scrollContent: { padding: 24, paddingBottom: 100 },
 
-  // --- Header ---
+  // Header
   header: { alignItems: 'center', marginBottom: 32 },
   avatarContainer: { 
     width: 100, height: 100, borderRadius: 50, 
@@ -187,10 +224,11 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontSize: 40, fontWeight: '800', color: '#64748B' },
   name: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
-  roleBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  roleText: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 1 },
+  
+  roleBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, flexDirection: 'row', alignItems: 'center' },
+  roleText: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 0.5 },
 
-  // --- Cards ---
+  // Cards
   card: { 
     backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, 
     borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small 
@@ -198,14 +236,14 @@ const styles = StyleSheet.create({
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
 
-  // --- Skill Level ---
+  // Skill Level
   levelRow: { flexDirection: 'row', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 4 },
   levelBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
   levelBtnActive: { backgroundColor: '#FFFFFF', ...SHADOWS.small },
   levelText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
   levelTextActive: { color: COLORS.primary, fontWeight: '700' },
 
-  // --- Goals ---
+  // Goals
   goalsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   goalPill: { 
     flexDirection: 'row', alignItems: 'center',
@@ -217,23 +255,18 @@ const styles = StyleSheet.create({
   goalTextActive: { color: '#166534' },
   emptyText: { fontStyle: 'italic', color: '#94A3B8' },
 
-  // --- Devices ---
+  // Devices
   connectBtn: { 
     padding: 16, borderRadius: 12, borderStyle: 'dashed', borderWidth: 2, 
     borderColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center' 
   },
   connectBtnText: { color: COLORS.primary, fontWeight: '700' },
-  connectedRow: { 
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
-    backgroundColor: '#F0FDF4', padding: 16, borderRadius: 12,
-    borderWidth: 1, borderColor: '#DCFCE7'
-  },
-  deviceText: { fontWeight: '700', color: '#166534' },
-  deviceSub: { fontSize: 11, color: '#15803D' },
-  disconnectBtn: { backgroundColor: '#FFF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  disconnectText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
 
-  // --- Logout ---
+  // Coach Empty
+  emptyContainer: { alignItems: 'center', marginVertical: 40, gap: 10 },
+  emptySubText: { color: '#94A3B8', fontSize: 14 },
+
+  // Logout
   logoutBtn: { 
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, 
     marginTop: 32, padding: 16, backgroundColor: '#FEF2F2', borderRadius: 16 

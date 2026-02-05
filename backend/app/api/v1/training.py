@@ -18,6 +18,7 @@ router = APIRouter()
 
 # --- Basic Schemas ---
 class DrillItemSchema(BaseModel):
+    drill_id: Optional[str] = None
     drill_name: str
     duration: int
     notes: Optional[str] = None
@@ -68,6 +69,7 @@ class UserResponse(BaseModel):
     name: str
     email: str
     role: str
+    xp: int = 0
     class Config:
         from_attributes = True
 
@@ -155,6 +157,7 @@ def get_programs(
                 "schedule": [
                     {
                         "day_order": s.day_order,
+                        "drill_id": s.drill_id,
                         "drill_name": s.drill_name,
                         "duration_minutes": s.duration_minutes,
                         "notes": s.notes
@@ -195,6 +198,7 @@ def create_program(
                 db_session = ProgramSession(
                     program_id=new_program.id,
                     day_order=sess.day,
+                    drill_id=drill.drill_id,
                     drill_name=drill.drill_name,
                     duration_minutes=drill.duration,
                     notes=drill.notes or ""
@@ -313,6 +317,7 @@ def create_session_log(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Create Log (Existing logic)
     new_log = SessionLog(
         player_id=current_user.id,
         program_id=session_data.program_id,
@@ -323,8 +328,8 @@ def create_session_log(
         date_completed=datetime.utcnow()
     )
     db.add(new_log)
-    db.commit()
-    db.refresh(new_log)
+    
+    # 2. Add Performances (Existing logic)
     for perf in session_data.drill_performances:
         db_perf = DrillPerformance(
             session_log_id=new_log.id,
@@ -333,8 +338,18 @@ def create_session_log(
             achieved_value=perf.achieved_value
         )
         db.add(db_perf)
+
+    # 3. ✅ UPDATE XP
+    xp_earned = (session_data.duration_minutes or 0) * 10
+    current_user.xp = (current_user.xp or 0) + xp_earned
+    
     db.commit()
-    return {"status": "success", "log_id": new_log.id}
+    return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned}
+
+# 4. ✅ ADD PROFILE ENDPOINT (To fetch XP)
+@router.get("/my-profile", response_model=UserResponse)
+def get_my_profile(current_user: User = Depends(get_current_user)):
+    return current_user
 
 @router.get("/my-session-logs", response_model=List[SessionLogSchema])
 def get_my_session_logs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -349,3 +364,43 @@ def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depen
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
     return [] # Simplified for now
+
+@router.post("/sessions")
+def create_session_log(
+    session_data: SessionLogCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # 1. Create Log
+    new_log = SessionLog(
+        player_id=current_user.id,
+        program_id=session_data.program_id,
+        session_id=session_data.session_day_order,
+        duration_minutes=session_data.duration_minutes,
+        rpe=session_data.rpe,
+        notes=session_data.notes,
+        date_completed=datetime.utcnow()
+    )
+    db.add(new_log)
+    
+    # 2. Add Performances
+    for perf in session_data.drill_performances:
+        db_perf = DrillPerformance(
+            session_log_id=new_log.id,
+            drill_id=perf.drill_id,
+            outcome=perf.outcome,
+            achieved_value=perf.achieved_value
+        )
+        db.add(db_perf)
+
+    # 3. ✅ UPDATE USER XP (Now fully functional)
+    # Logic: 10 XP per minute trained
+    xp_earned = (session_data.duration_minutes or 0) * 10
+    
+    # Add to current XP (handle None case safely)
+    current_user.xp = (current_user.xp or 0) + xp_earned
+    
+    # The 'current_user' object is tracked by the session, so commit saves changes to User too
+    db.commit()
+    
+    return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned, "total_xp": current_user.xp}

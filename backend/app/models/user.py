@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy import Column, String, ForeignKey, Integer
 from sqlalchemy.orm import relationship, backref
 from app.core.database import Base
 import uuid
@@ -17,7 +17,7 @@ class User(Base):
     role = Column(String)
     name = Column(String)
     goals = Column(String, nullable = True)
-    
+    xp = Column(Integer, default=0)
     # Coach ID is also a String
     coach_id = Column(String, ForeignKey("users.id"), nullable=True)
 

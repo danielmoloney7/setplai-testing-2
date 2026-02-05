@@ -6,9 +6,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight } from 'lucide-react-native';
+import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, CheckCircle, PlayCircle } from 'lucide-react-native'; // ✅ Added CheckCircle, PlayCircle
 
-import { fetchPrograms } from '../services/api'; // ✅ Fetch ALL programs (DB)
+import { fetchPrograms, fetchSessionLogs } from '../services/api'; // ✅ Fetch Programs AND Logs
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function DashboardScreen({ navigation }) {
@@ -23,28 +23,30 @@ export default function DashboardScreen({ navigation }) {
     try {
         const role = await AsyncStorage.getItem('user_role'); 
         const name = await AsyncStorage.getItem('user_name');
-        // Ensure role is safe
         const safeRole = (role || 'PLAYER').toUpperCase(); 
         
         setUser({ name: name || 'Athlete', role: safeRole });
 
         if (safeRole === 'PLAYER') {
-            // 1. Fetch Programs (API returns all assigned to me)
-            const myPrograms = await fetchPrograms(); 
+            // 1. Fetch Programs AND Logs in parallel
+            const [myPrograms, myLogs] = await Promise.all([
+                fetchPrograms(),
+                fetchSessionLogs()
+            ]); 
             
-            // 2. Count Pending (Case Insensitive Fix)
+            // 2. Count Pending
             const pending = myPrograms.filter(p => 
                 (p.status || '').toUpperCase() === 'PENDING'
             );
             setPendingCount(pending.length);
 
-            // 3. Find Active (Case Insensitive Fix)
+            // 3. Find Active
             const active = myPrograms.filter(p => 
                 (p.status || '').toUpperCase() === 'ACTIVE'
             );
             
             console.log(`Dashboard Debug: Found ${active.length} active programs.`);
-            calculateNextSession(active);
+            calculateNextSession(active, myLogs);
         }
     } catch (error) {
         console.log("Dashboard Error:", error);
@@ -58,29 +60,22 @@ export default function DashboardScreen({ navigation }) {
   );
 
   // --- LOGIC: FIND NEXT SESSION ---
-  const calculateNextSession = (activePrograms) => {
+  const calculateNextSession = (activePrograms, logs) => {
       // 1. Safety Check
       if (!activePrograms || activePrograms.length === 0) {
           setNextSession(null);
           return;
       }
 
-      // 2. Sort by Newest First (Robust Date & ID Check)
+      // 2. Sort by Newest First
       const sortedPrograms = activePrograms.sort((a, b) => {
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-          
-          // If dates are different, sort by date
           if (dateB !== dateA) return dateB - dateA;
-          
-          // Fallback: Sort by ID (assuming higher ID = newer)
           return (parseInt(b.id) || 0) - (parseInt(a.id) || 0);
       });
 
       const priorityProgram = sortedPrograms[0];
-      console.log("Displaying Next Up For:", priorityProgram.title);
-
-      // 3. Get Schedule
       const rawSchedule = priorityProgram.schedule || priorityProgram.sessions || [];
       
       if (rawSchedule.length === 0) {
@@ -88,24 +83,42 @@ export default function DashboardScreen({ navigation }) {
           return;
       }
 
-      // 4. Find Day 1 Content
-      const firstItem = rawSchedule[0];
-      // Group all drills that belong to this day (in case API returns flat list)
-      const sessionDrills = rawSchedule.filter(i => i.day_order === firstItem.day_order);
-      
+      // 3. ✅ SMART FILTER: Check Logs for Completed Days
+      const completedDays = logs
+          .filter(log => log.program_id === priorityProgram.id)
+          .map(log => log.session_id); // session_id stores the day_order
+
+      console.log(`Program: ${priorityProgram.title} | Completed Days: ${completedDays}`);
+
+      // 4. Find the first drill belonging to a day NOT in completedDays
+      const nextDrill = rawSchedule.find(item => !completedDays.includes(item.day_order));
+
+      // 5. Check for Completion
+      if (!nextDrill) {
+          setNextSession({ 
+              isComplete: true, 
+              programTitle: priorityProgram.title 
+          });
+          return;
+      }
+
+      // 6. Group all drills for that specific Day
+      const nextDayNum = nextDrill.day_order;
+      const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
       const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes) || 0), 0);
 
       setNextSession({
-          title: `Day ${firstItem.day_order} Training`, 
+          isComplete: false,
+          title: `Day ${nextDayNum} Training`, 
           programTitle: priorityProgram.title,
           duration: totalMins > 0 ? totalMins : 45,
           drillCount: sessionDrills.length,
           programId: priorityProgram.id,
-          // Pass full object to session screen
           fullSessionData: {
-              day_order: firstItem.day_order,
-              title: `Day ${firstItem.day_order}`,
-              items: sessionDrills
+              day_order: nextDayNum,
+              title: `Day ${nextDayNum}`,
+              items: sessionDrills,
+              totalMinutes: totalMins
           }
       });
   };
@@ -160,33 +173,48 @@ export default function DashboardScreen({ navigation }) {
         <Text style={[styles.sectionHeader, { paddingHorizontal: 24 }]}>Up Next</Text>
         <View style={{ paddingHorizontal: 24 }}>
           {nextSession ? (
-            <TouchableOpacity 
-                style={styles.upNextCard} 
-                activeOpacity={0.9} 
-                onPress={() => navigation.navigate('Session', { 
-                    session: nextSession.fullSessionData, 
-                    programId: nextSession.programId 
-                })}
-            >
-              <View style={styles.upNextHeader}>
-                <View style={styles.tag}><Text style={styles.tagText}>TODAY</Text></View>
-                <View style={styles.planBadge}><Text style={styles.planBadgeText}>My Plan</Text></View>
-              </View>
-              
-              <Text style={styles.upNextTitle}>{nextSession.title}</Text>
-              <Text style={styles.upNextSubtitle}>{nextSession.programTitle}</Text>
-              
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <Clock size={14} color="#64748B" />
-                  <Text style={styles.metaText}>{nextSession.duration} min</Text>
+            nextSession.isComplete ? (
+                // ✅ Program Complete State
+                <View style={styles.completeCard}>
+                    <CheckCircle size={40} color="#22C55E" style={{marginBottom: 8}} />
+                    <Text style={styles.cardTitle}>Program Complete!</Text>
+                    <Text style={styles.cardSub}>You finished {nextSession.programTitle}. Time to start a new plan?</Text>
                 </View>
-                <View style={styles.metaItem}>
-                  <Dumbbell size={14} color="#64748B" />
-                  <Text style={styles.metaText}>{nextSession.drillCount} Drills</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
+            ) : (
+                // ✅ Normal Next Session State
+                <TouchableOpacity 
+                    style={styles.upNextCard} 
+                    activeOpacity={0.9} 
+                    onPress={() => navigation.navigate('Session', { 
+                        session: nextSession.fullSessionData, 
+                        programId: nextSession.programId 
+                    })}
+                >
+                  <View style={styles.upNextHeader}>
+                    <View style={styles.tag}><Text style={styles.tagText}>TODAY</Text></View>
+                    <View style={styles.planBadge}><Text style={styles.planBadgeText}>My Plan</Text></View>
+                  </View>
+                  
+                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+                      <View>
+                        <Text style={styles.upNextTitle}>{nextSession.title}</Text>
+                        <Text style={styles.upNextSubtitle}>{nextSession.programTitle}</Text>
+                        
+                        <View style={styles.metaRow}>
+                            <View style={styles.metaItem}>
+                            <Clock size={14} color="#64748B" />
+                            <Text style={styles.metaText}>{nextSession.duration} min</Text>
+                            </View>
+                            <View style={styles.metaItem}>
+                            <Dumbbell size={14} color="#64748B" />
+                            <Text style={styles.metaText}>{nextSession.drillCount} Drills</Text>
+                            </View>
+                        </View>
+                      </View>
+                      <PlayCircle size={32} color={COLORS.primary} fill="#E0F2FE" style={{marginTop: 4}}/>
+                  </View>
+                </TouchableOpacity>
+            )
           ) : (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>No active plan.</Text>
@@ -272,6 +300,8 @@ const styles = StyleSheet.create({
   iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   quickTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
   quickDesc: { fontSize: 12, color: '#64748B', lineHeight: 16 },
+  
+  // Up Next Styles
   upNextCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium },
   upNextHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   tag: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
@@ -283,9 +313,16 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: 16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: '#475569', fontWeight: '500' },
+  
+  // Complete / Empty Styles
+  completeCard: { backgroundColor: '#F0FDF4', borderRadius: 20, padding: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#BBF7D0' },
+  cardTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  cardSub: { fontSize: 13, color: '#64748B', textAlign: 'center' },
+  
   emptyCard: { padding: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, borderStyle: 'dashed' },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
   subText: { color: '#CBD5E1', fontSize: 12, marginTop: 4 },
+  
   grid: { flexDirection: 'row', gap: 16 },
   actionCard: { flex: 1, backgroundColor: '#FFF', padding: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.card },
   actionText: { fontWeight: 'bold', fontSize: 16, color: '#334155' },

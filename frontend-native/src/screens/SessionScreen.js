@@ -42,7 +42,8 @@ export default function SessionScreen({ route, navigation }) {
   const [sessionStartTime, setSessionStartTime] = useState(null);
 
   const currentItem = session?.items ? session.items[currentDrillIndex] : null;
-  const currentDuration = currentItem ? (currentItem.duration_minutes || currentItem.targetDurationMin || 0) : 0;
+  // Robustly handle duration from different sources (DB vs Mock)
+  const currentDuration = currentItem ? (currentItem.duration_minutes || currentItem.targetDurationMin || 10) : 0;
 
   // --- TIMER LOGIC ---
   useEffect(() => {
@@ -85,12 +86,25 @@ export default function SessionScreen({ route, navigation }) {
   };
 
   const completeDrill = (outcome) => {
+    if (!currentItem) return;
+
+    // ✅ FIX: Robustly find the drill ID.
+    // Backend sends 'drill_id'. Mock data might use 'drillId' or 'id'.
+    // We default to "unknown_drill" to prevent 422 crashes, but logged errors help debug.
+    const safeDrillId = currentItem.drill_id || currentItem.drillId || currentItem.id || "unknown_drill";
+    
+    if (safeDrillId === "unknown_drill") {
+        console.warn("⚠️ Warning: Drill ID missing for item:", currentItem);
+    }
+
     const newLog = {
-      drill_id: currentItem.drillId || currentItem.id,
+      drill_id: safeDrillId,
       outcome: outcome,
       achieved_value: 0
     };
-    setDrillLogs([...drillLogs, newLog]);
+    
+    // Add to local logs
+    setDrillLogs(prev => [...prev, newLog]);
 
     if (currentDrillIndex < session.items.length - 1) {
       setCurrentDrillIndex(prev => prev + 1);
@@ -102,21 +116,44 @@ export default function SessionScreen({ route, navigation }) {
 
   const saveSession = async () => {
     try {
-      const duration = Math.round((new Date() - sessionStartTime) / 60000) || 1;
+      // 1. Calculate Duration
+      const endTime = new Date();
+      const startTime = sessionStartTime || endTime;
+      const duration = Math.round((endTime - startTime) / 60000) || 1;
+
+      // 2. Prepare Payload (Robust ID Check)
+      const safeLogs = drillLogs.map(log => ({
+          ...log,
+          drill_id: log.drill_id || "unknown_drill" 
+      }));
+
       const payload = {
         program_id: programId,
         session_day_order: session.day_order || 1,
         duration_minutes: duration,
         rpe: rpe,
         notes: notes,
-        drill_performances: drillLogs
+        drill_performances: safeLogs
       };
+
+      console.log("Saving Session...", JSON.stringify(payload));
+
+      // 3. Send to Backend
       await api.post('/sessions', payload);
-      Alert.alert("Great Job!", "Session saved to your history.");
+      
+      // 4. ✅ FIX: Navigate IMMEDIATELY (Don't wait for the Alert)
+      // We go to Main -> Progress tab so the user sees their XP update
       navigation.navigate('Main', { screen: 'Progress' });
+
+      // 5. Show Success Feedback (This will appear over the Progress screen)
+      // Using a small timeout ensures the navigation animation starts first
+      setTimeout(() => {
+        Alert.alert("Great Job!", "Session saved! XP Earned.");
+      }, 500);
+
     } catch (error) {
-      console.error(error);
-      Alert.alert("Error", "Could not save session.");
+      console.error("Save Error:", error?.response?.data || error);
+      Alert.alert("Error", "Could not save session. Please try again.");
     }
   };
 
@@ -333,7 +370,7 @@ export default function SessionScreen({ route, navigation }) {
             />
           </View>
 
-          <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession}>
+          <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession} >
             <Text style={styles.startBtnText}>Save & Finish</Text>
           </TouchableOpacity>
         </ScrollView>

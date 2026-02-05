@@ -40,6 +40,10 @@ class ProgramSession(Base):
     id = Column(String, primary_key=True, default=generate_id)
     program_id = Column(String, ForeignKey("programs.id"))
     day_order = Column(Integer)
+    
+    # ✅ FIX: Add drill_id so we can link back to the drill definition
+    drill_id = Column(String, nullable=True) 
+    
     drill_name = Column(String(255))
     duration_minutes = Column(Integer)
     notes = Column(Text, nullable=True)

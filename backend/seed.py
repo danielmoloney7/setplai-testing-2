@@ -1,5 +1,4 @@
 from app.core.database import SessionLocal, engine, Base
-# ✅ IMPORTS
 from app.models.user import User
 from app.models.training import Drill, Program, ProgramSession, ProgramAssignment
 from app.core.security import get_password_hash
@@ -11,103 +10,68 @@ db = SessionLocal()
 def seed_data():
     print("🌱 Seeding Data...")
     
-    # ⚠️ CRITICAL: Drop all tables to apply the Schema Change (Int -> String IDs)
-    # This deletes old data to fix the 422 mismatch error and ensures clean String IDs.
+    # Drop and recreate tables to ensure new 'xp' column is added
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
-    # --- 1. Seed Drills ---
-    # Using explicit IDs helps with debugging, but the model handles UUIDs automatically too.
+    # --- 1. Rich Drills (From Legacy App) ---
     drills = [
-        Drill(id="drill_1", name="Wide Serve Targeting", category="Serve", difficulty="Intermediate", description="Hit 10 serves to the deuce wide corner.", default_duration_min=15),
-        Drill(id="drill_2", name="Cross-Court Forehand", category="Forehand", difficulty="Intermediate", description="Sustain a cross-court rally for 20 balls.", default_duration_min=10),
-        Drill(id="drill_3", name="Spider Drill", category="Footwork", difficulty="Advanced", description="Sprint from center mark to corners and back.", default_duration_min=10),
-        Drill(id="drill_4", name="Dynamic Warmup", category="Warmup", difficulty="Beginner", description="Jogging, high knees, side shuffles.", default_duration_min=10),
-        Drill(id="drill_5", name="Volley Reactions", category="Volley", difficulty="Advanced", description="Rapid fire volleys at the net.", default_duration_min=5),
+        Drill(id="d1", name="Wide Serve Targeting", category="Serve", difficulty="Intermediate", 
+              description="Hit 10 serves to the deuce wide corner, then 10 to ad wide.", 
+              default_duration_min=15, video_url="https://media.giphy.com/media/3o6Zt8qDiPE2d3kAzA/giphy.gif"),
+        
+        Drill(id="d2", name="T-Serve Precision", category="Serve", difficulty="Advanced", 
+              description="Focus on hitting the T-line. 20 reps each side.", 
+              default_duration_min=15, video_url="https://media.giphy.com/media/l0HlJDaeqNXVcWWfq/giphy.gif"),
+
+        Drill(id="d3", name="Cross-Court Forehand Rally", category="Forehand", difficulty="Intermediate", 
+              description="Sustain a cross-court rally for 20 balls without error.", 
+              default_duration_min=10, video_url="https://media.giphy.com/media/3o7TKrEzvJbsQNtF5u/giphy.gif"),
+
+        Drill(id="d7", name="Volley-Volley Reaction", category="Volley", difficulty="Advanced", 
+              description="Rapid fire volleys at the net with a partner or wall.", 
+              default_duration_min=8, video_url="https://media.giphy.com/media/3o7TKvxnDibVYwawHC/giphy.gif"),
+              
+        Drill(id="w1", name="Dynamic Court Sprints", category="Warmup", difficulty="Beginner", 
+              description="Jogging, high knees, butt kicks, and side shuffles across the baseline.", 
+              default_duration_min=10, video_url="https://media.giphy.com/media/3o7TKy7hIfMZuK2obC/giphy.gif"),
     ]
     db.add_all(drills)
     db.commit()
     print("   ✅ Drills added.")
     
-    # --- 2. Seed Users ---
-    # Create Coach with explicit string ID
+    # --- 2. Users with XP ---
     coach_id = "user_coach_1"
-    coach = User(
-        id=coach_id,
-        email="coach@test.com", 
-        hashed_password=get_password_hash("password"), 
-        role="COACH", 
-        name="Coach Williams"
-    )
+    coach = User(id=coach_id, email="coach@test.com", hashed_password=get_password_hash("daniel"), role="COACH", name="Coach Williams", xp=5000)
     db.add(coach)
     
-    # Create Players linked to Coach
-    p1 = User(
-        id="user_rafa",
-        email="rafa@test.com", 
-        hashed_password=get_password_hash("password"), 
-        role="PLAYER", 
-        name="Rafael N.", 
-        coach_id=coach_id
-    )
-    p2 = User(
-        id="user_serena",
-        email="serena@test.com", 
-        hashed_password=get_password_hash("password"), 
-        role="PLAYER", 
-        name="Serena W.", 
-        coach_id=coach_id
-    )
+    p1 = User(id="user_rafa", email="rafa@test.com", hashed_password=get_password_hash("daniel"), role="PLAYER", name="Rafael N.", coach_id=coach_id, xp=1200)
+    p2 = User(id="user_serena", email="serena@test.com", hashed_password=get_password_hash("daniel"), role="PLAYER", name="Serena W.", coach_id=coach_id, xp=3400)
     db.add_all([p1, p2])
     db.commit()
     print("   ✅ Users added.")
 
-    # --- 3. Seed Program & Assignments ---
+    # --- 3. Program ---
     program_id = "prog_baseline"
-    program = Program(
-        id=program_id,
-        title="Pre-Season Baseline",
-        description="A 4-week foundation program focusing on consistency and footwork.",
-        creator_id=coach_id
-    )
+    program = Program(id=program_id, title="Pre-Season Baseline", description="A 4-week foundation program focusing on consistency and footwork.", creator_id=coach_id)
     db.add(program)
 
-    # Add Sessions linked to Program
     sessions = [
-        # Day 1
         ProgramSession(program_id=program_id, day_order=1, drill_name="Dynamic Warmup", duration_minutes=10, notes="Focus on form"),
-        ProgramSession(program_id=program_id, day_order=1, drill_name="Cross-Court Forehand", duration_minutes=15, notes="Keep depth"),
-        ProgramSession(program_id=program_id, day_order=1, drill_name="Spider Drill", duration_minutes=10, notes="High intensity"),
-        # Day 2
-        ProgramSession(program_id=program_id, day_order=2, drill_name="Dynamic Warmup", duration_minutes=10, notes="Warm up loose"),
+        ProgramSession(program_id=program_id, day_order=1, drill_name="Cross-Court Forehand Rally", duration_minutes=15, notes="Keep depth"),
         ProgramSession(program_id=program_id, day_order=2, drill_name="Wide Serve Targeting", duration_minutes=20, notes="Hit your spots")
     ]
     db.add_all(sessions)
     
-    # Assign to Players
+    # Active Assignments
     assignments = [
-        ProgramAssignment(
-            program_id=program_id,
-            coach_id=coach_id,
-            player_id="user_rafa",
-            status="ACTIVE",
-            assigned_at=datetime.datetime.utcnow()
-        ),
-        ProgramAssignment(
-            program_id=program_id,
-            coach_id=coach_id,
-            player_id="user_serena",
-            status="ACTIVE",
-            assigned_at=datetime.datetime.utcnow()
-        )
+        ProgramAssignment(program_id=program_id, coach_id=coach_id, player_id="user_rafa", status="ACTIVE", assigned_at=datetime.datetime.utcnow()),
+        ProgramAssignment(program_id=program_id, coach_id=coach_id, player_id="user_serena", status="ACTIVE", assigned_at=datetime.datetime.utcnow())
     ]
     db.add_all(assignments)
-    
     db.commit()
-    print("   ✅ Program 'Pre-Season Baseline' created and assigned.")
-
+    print("   ✅ Program assigned.")
     db.close()
-    print("🏁 Seeding Complete.")
 
 if __name__ == "__main__":
     seed_data()

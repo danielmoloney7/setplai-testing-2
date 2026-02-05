@@ -4,8 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // 1. iOS Simulator: 'http://127.0.0.1:8000/api/v1'
 // 2. Android Emulator: 'http://10.0.2.2:8000/api/v1'
 // 3. Real Phone: 'http://YOUR_LAPTOP_IP:8000/api/v1'
-const API_URL = 'http://10.3.23.151:8000/api/v1'; 
+// const API_URL = 'http://10.3.23.151:8000/api/v1'; 
 
+const API_URL = 'http://192.168.0.15:8000/api/v1'; 
 const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -137,6 +138,16 @@ export const updateProgramStatus = async (programId, status) => {
   } catch (error) {
     console.error("Update Status Error:", error);
     throw error;
+  }
+};
+
+export const fetchSessionLogs = async () => {
+  try {
+    const response = await api.get('/my-session-logs');
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching session logs:", error);
+    return [];
   }
 };
 
