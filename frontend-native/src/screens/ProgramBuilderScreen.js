@@ -13,7 +13,7 @@ import {
 import { COLORS, SHADOWS } from '../constants/theme';
 
 // Import API services
-import { fetchMyTeam, fetchDrills, createProgram } from '../services/api'; 
+import { fetchMyTeam, fetchDrills, createProgram, fetchSquads } from '../services/api'; 
 import { generateAIProgram } from '../services/geminiService';
 
 const PREMADE_PROGRAMS = [
@@ -37,10 +37,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [athletes, setAthletes] = useState([]);
   const [availableDrills, setAvailableDrills] = useState([]);
-  const [squads, setSquads] = useState([
-    { id: 'sq1', name: 'Elite Juniors', memberCount: 4 },
-    { id: 'sq2', name: 'Morning Cardio', memberCount: 8 }
-  ]);
+  const [squads, setSquads] = useState([])
 
   // Form State
   const [prompt, setPrompt] = useState(initialPrompt || '');
@@ -56,10 +53,15 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         if (id) setUserId(id);
 
         try {
-            // Load data silently
-            const [teamData, drillsData] = await Promise.all([fetchMyTeam(), fetchDrills()]);
+            // ✅ Fetch Real Squads in Parallel
+            const [teamData, drillsData, squadsData] = await Promise.all([
+                fetchMyTeam(), 
+                fetchDrills(),
+                fetchSquads()
+            ]);
             setAthletes(teamData || []);
             setAvailableDrills(drillsData || []);
+            setSquads(squadsData || []); // ✅ Set real squads
         } catch (e) { console.log("Data load error", e); }
     };
     init();
@@ -333,7 +335,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                        <Users size={20} color="#4F46E5"/>
                        <View style={{flex:1, marginLeft: 12}}>
                            <Text style={styles.targetName}>{sq.name}</Text>
-                           <Text style={styles.targetSub}>{sq.memberCount} Athletes</Text>
+                           {/* ✅ Fix property name (API returns member_count) */}
+                           <Text style={styles.targetSub}>{sq.member_count || 0} Athletes</Text>
                        </View>
                        {isSelected && <Check size={20} color={COLORS.primary}/>}
                    </TouchableOpacity>

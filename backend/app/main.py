@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.database import engine, Base
-from app.api.v1 import auth, training  # <--- IMPORT TRAINING ROUTER here
+from app.api.v1 import auth, training, squads  # <--- IMPORT TRAINING ROUTER here
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- IMPORT MODELS HERE (Crucial for creating tables) ---
@@ -23,6 +23,7 @@ app.add_middleware(
 # Include the routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(training.router, prefix="/api/v1", tags=["training"])
+app.include_router(squads.router, prefix="/api/v1/squads", tags=["squads"])
 
 @app.get("/")
 def read_root():

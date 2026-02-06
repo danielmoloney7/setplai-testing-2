@@ -3,15 +3,16 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Ale
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Clock, CheckCircle, Plus, Calendar, XCircle } from 'lucide-react-native';
+import { CheckCircle, Plus, Calendar, XCircle } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchPrograms, updateProgramStatus } from '../services/api'; // ✅ API imports
+import { fetchPrograms, updateProgramStatus } from '../services/api';
 
 export default function ProgramsListScreen({ navigation }) {
   const [role, setRole] = useState('PLAYER');
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Reload data every time screen comes into focus
   useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const loadData = async () => {
@@ -21,32 +22,23 @@ export default function ProgramsListScreen({ navigation }) {
         const currentRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
         setRole(currentRole);
         
-        // 1. Fetch Data (API already filters by user/creator)
+        // 1. Fetch Data
         const dbPrograms = await fetchPrograms(); 
 
-        console.log(`Plans Tab: Fetched ${dbPrograms.length} programs from API`);
-
-        // 2. Sort Logic (Case Insensitive)
+        // 2. Sort: PENDING first, then by Date
         const sorted = dbPrograms.sort((a, b) => {
             const statusA = (a.status || '').toUpperCase();
             const statusB = (b.status || '').toUpperCase();
             
-            // PENDING items go to the top (Action required)
             if (statusA === 'PENDING' && statusB !== 'PENDING') return -1;
             if (statusA !== 'PENDING' && statusB === 'PENDING') return 1;
             
-            // Then sort by Date (Newest first)
-            // Robust date parsing or fallback to ID
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-            
-            if (dateA !== dateB) return dateB - dateA;
-            return (b.id || 0) - (a.id || 0);
+            return dateB - dateA; // Newest first
         });
 
-        // 3. Set State directly (Removing the .filter() step fixes the mismatch)
         setPrograms(sorted);
-
     } catch(e) {
         console.log("Error loading programs", e);
     } finally {
@@ -56,11 +48,14 @@ export default function ProgramsListScreen({ navigation }) {
   
   const handleStatusChange = async (id, newStatus) => {
       try {
-          // Call API to update status in DB
+          // 1. Call API
           await updateProgramStatus(id, newStatus);
           
+          // 2. Alert User
           Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
-          loadData(); // Refresh list to update UI
+          
+          // 3. ✅ IMMEDIATE REFRESH: Update list to remove buttons/update status text
+          loadData(); 
       } catch (e) {
           Alert.alert("Error", "Could not update status. Please try again.");
       }
@@ -76,19 +71,19 @@ export default function ProgramsListScreen({ navigation }) {
         <View style={{flex: 1}}>
             <Text style={styles.cardTitle}>{item.title}</Text>
             <Text style={styles.cardSub}>
-                {role === 'COACH' 
-                    ? `${item.assigned_to?.length || 0} Assignees` 
-                    : item.coach_name || 'Coach'}
+                {role === 'COACH' ? `${item.assigned_to?.length || 0} Assignees` : (item.coach_name || 'Coach')}
             </Text>
         </View>
-        <View style={[styles.badge, item.status === 'ACTIVE' ? styles.activeBadge : styles.pendingBadge]}>
-            <Text style={[styles.badgeText, item.status === 'ACTIVE' ? styles.activeText : styles.pendingText]}>
+        
+        {/* Status Badge */}
+        <View style={[styles.badge, item.status === 'ACTIVE' ? styles.activeBadge : (item.status === 'PENDING' ? styles.pendingBadge : styles.declinedBadge)]}>
+            <Text style={[styles.badgeText, item.status === 'ACTIVE' ? styles.activeText : (item.status === 'PENDING' ? styles.pendingText : styles.declinedText)]}>
                 {item.status}
             </Text>
         </View>
       </View>
 
-      {/* Action Buttons for Player (Pending Only) */}
+      {/* ✅ Action Buttons (Only for Players with PENDING status) */}
       {role === 'PLAYER' && item.status === 'PENDING' && (
           <View style={styles.actionsRow}>
               <TouchableOpacity 
@@ -124,7 +119,7 @@ export default function ProgramsListScreen({ navigation }) {
         data={programs} 
         renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
-        contentContainerStyle={{ padding: 24 }}
+        contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
         ListEmptyComponent={<Text style={{textAlign:'center', marginTop:50, color:'#94A3B8'}}>No programs found.</Text>}
       />
@@ -142,11 +137,16 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', width: '90%' },
   cardSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
   badge: { position:'absolute', top:0, right:0, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  
   pendingBadge: { backgroundColor: '#FFF7ED' },
   activeBadge: { backgroundColor: '#DCFCE7' },
+  declinedBadge: { backgroundColor: '#FEF2F2' },
+  
   badgeText: { fontSize: 9, fontWeight: '700' },
   pendingText: { color: '#C2410C' },
   activeText: { color: '#15803D' },
+  declinedText: { color: '#B91C1C' },
+
   actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, borderRadius: 8, gap: 6 },
   acceptBtn: { backgroundColor: COLORS.primary },

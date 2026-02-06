@@ -1,158 +1,210 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, 
-  Image, RefreshControl, ActivityIndicator 
-} from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Modal, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, UserPlus, ChevronRight, Users } from 'lucide-react-native';
+import { useFocusEffect } from '@react-navigation/native'; // ✅ Ensure this is imported
+import { Plus, Users, Check, ChevronRight } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchMyTeam } from '../services/api'; // <--- Ensure this is imported
+import { fetchMyTeam, fetchSquads, createSquad } from '../services/api'; 
 
-export default function TeamScreen({ navigation }) {
+export default function TeamScreen({ navigation, route }) { // ✅ Added route destructuring
+  const [viewMode, setViewMode] = useState('ATHLETES');
+  const [team, setTeam] = useState([]);
+  const [squads, setSquads] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [athletes, setAthletes] = useState([]);
   
-  // Hardcoded squads for now (since we haven't built squad fetching yet)
-  const [squads, setSquads] = useState([
-    { id: 'sq1', name: 'Elite Juniors', count: 2, level: 'Advanced' }
-  ]);
+  // Modal State
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newSquadName, setNewSquadName] = useState('');
+  const [selectedMembers, setSelectedMembers] = useState([]);
 
-  const loadTeam = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await fetchMyTeam();
-      setAthletes(data);
-    } catch (error) {
-      console.log("Failed to load team");
+        const [teamData, squadData] = await Promise.all([
+            fetchMyTeam(),
+            fetchSquads()
+        ]);
+        setTeam(teamData || []);
+        setSquads(squadData || []);
+    } catch (e) {
+        console.error(e);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadTeam();
-  }, []);
+  // ✅ AUTO-OPEN MODAL LOGIC
+  // This catches the instruction from CoachActionScreen
+  useFocusEffect(
+    useCallback(() => {
+      loadData(); // Load data on focus
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.title}>My Team</Text>
-        <Text style={styles.subtitle}>{athletes.length} Athletes • {squads.length} Squads</Text>
-      </View>
-      <View style={{flexDirection: 'row', gap: 8}}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => alert("Invite Logic")}>
-          <UserPlus color={COLORS.primary} size={20} />
-        </TouchableOpacity>
-      </View>
-    </View>
+      if (route.params?.openModal) {
+        setViewMode('SQUADS'); // Switch to squad view automatically
+        setModalVisible(true);
+        
+        // Clear the param immediately so it doesn't reopen every switch
+        navigation.setParams({ openModal: undefined });
+      }
+    }, [route.params?.openModal])
   );
 
-  const renderSquadItem = ({ item }) => (
-    <TouchableOpacity style={styles.squadCard} onPress={() => alert(`Open Squad: ${item.name}`)}>
-      <View style={styles.squadIcon}>
-        <Text style={styles.squadInitial}>{item.name[0]}</Text>
-      </View>
-      <View style={{flex: 1}}>
-        <Text style={styles.cardTitle}>{item.name}</Text>
-        <Text style={styles.cardSub}>{item.level} • {item.count} Members</Text>
-      </View>
-      <ChevronRight size={20} color="#94A3B8" />
+  const toggleMemberSelection = (id) => {
+    if (selectedMembers.includes(id)) {
+      setSelectedMembers(prev => prev.filter(m => m !== id));
+    } else {
+      setSelectedMembers(prev => [...prev, id]);
+    }
+  };
+
+  const handleCreateSquad = async () => {
+    if (!newSquadName.trim()) return;
+    try {
+        await createSquad(newSquadName, "General", selectedMembers);
+        setModalVisible(false);
+        setNewSquadName('');
+        setSelectedMembers([]);
+        loadData();
+    } catch (e) {
+        Alert.alert("Error", "Could not create squad.");
+    }
+  };
+
+  const renderAthleteItem = ({ item }) => (
+    <TouchableOpacity 
+        style={styles.card} 
+        onPress={() => navigation.navigate('AthleteDetail', { athlete: item })}
+    >
+        <View style={styles.avatar}><Text style={styles.avatarText}>{item.name[0]}</Text></View>
+        <View style={{flex: 1}}>
+            <Text style={styles.name}>{item.name}</Text>
+            <Text style={styles.subText}>{item.role}</Text>
+        </View>
+        <ChevronRight size={20} color="#CBD5E1" />
     </TouchableOpacity>
   );
 
-  const renderAthleteItem = ({ item }) => (
-    <TouchableOpacity style={styles.athleteCard} onPress={() => alert(`Open Player: ${item.name}`)}>
-      <Image 
-        source={{ uri: item.avatar || 'https://via.placeholder.com/50' }} 
-        style={styles.avatar} 
-      />
-      <View style={{flex: 1}}>
-        <Text style={styles.cardTitle}>{item.name}</Text>
-        <Text style={styles.cardSub}>{item.email}</Text>
-      </View>
-      <View>
-        <Text style={styles.xpText}>{item.role}</Text>
-      </View>
+  const renderSquadItem = ({ item }) => (
+    <TouchableOpacity 
+        style={styles.card}
+        onPress={() => navigation.navigate('SquadDetail', { squad: item })}
+    >
+        <View style={[styles.avatar, { backgroundColor: '#E0F2FE' }]}>
+            <Users size={20} color="#0284C7" />
+        </View>
+        <View style={{flex: 1}}>
+            <Text style={styles.name}>{item.name}</Text>
+            <Text style={styles.subText}>{item.member_count} Members</Text>
+        </View>
+        <ChevronRight size={20} color="#CBD5E1" />
     </TouchableOpacity>
   );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {renderHeader()}
-
-      <View style={styles.content}>
-        {/* Squads Section */}
-        <View style={styles.sectionHeader}>
-          <Users size={16} color="#64748B" />
-          <Text style={styles.sectionTitle}>SQUADS</Text>
-        </View>
-        
-        <FlatList
-          data={squads}
-          keyExtractor={item => item.id}
-          renderItem={renderSquadItem}
-          scrollEnabled={false}
-          style={{marginBottom: 24}}
-        />
-
-        {/* Athletes Section */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>ALL ATHLETES</Text>
-        </View>
-
-        {loading ? (
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        ) : (
-          <FlatList
-            data={athletes}
-            keyExtractor={item => item.id}
-            renderItem={renderAthleteItem}
-            refreshControl={<RefreshControl refreshing={loading} onRefresh={loadTeam} />}
-            ListEmptyComponent={
-              <Text style={{textAlign: 'center', color: '#94A3B8', marginTop: 20}}>No athletes found.</Text>
-            }
-            contentContainerStyle={{paddingBottom: 100}}
-          />
-        )}
+      <View style={styles.header}>
+        <Text style={styles.title}>My Team</Text>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
+            <Plus color="#FFF" size={24} />
+        </TouchableOpacity>
       </View>
+
+      <View style={styles.tabs}>
+        <TouchableOpacity onPress={() => setViewMode('ATHLETES')} style={[styles.tab, viewMode === 'ATHLETES' && styles.activeTab]}>
+            <Text style={[styles.tabText, viewMode === 'ATHLETES' && styles.activeTabText]}>Athletes</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setViewMode('SQUADS')} style={[styles.tab, viewMode === 'SQUADS' && styles.activeTab]}>
+            <Text style={[styles.tabText, viewMode === 'SQUADS' && styles.activeTabText]}>Squads</Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={viewMode === 'ATHLETES' ? team : squads}
+        keyExtractor={item => item.id}
+        renderItem={viewMode === 'ATHLETES' ? renderAthleteItem : renderSquadItem}
+        contentContainerStyle={styles.list}
+        refreshing={loading}
+        onRefresh={loadData}
+      />
+
+      <Modal visible={modalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>New Squad</Text>
+                
+                <TextInput 
+                    style={styles.input} 
+                    placeholder="Squad Name" 
+                    value={newSquadName}
+                    onChangeText={setNewSquadName}
+                />
+
+                <Text style={styles.label}>Select Athletes:</Text>
+                <View style={styles.memberList}>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                        {team.map(player => {
+                            const isSelected = selectedMembers.includes(player.id);
+                            return (
+                                <TouchableOpacity 
+                                    key={player.id} 
+                                    style={[styles.memberRow, isSelected && styles.memberSelected]}
+                                    onPress={() => toggleMemberSelection(player.id)}
+                                >
+                                    <Text style={[styles.memberName, isSelected && {color: COLORS.primary, fontWeight: '700'}]}>{player.name}</Text>
+                                    {isSelected && <Check size={16} color={COLORS.primary} />}
+                                </TouchableOpacity>
+                            )
+                        })}
+                    </ScrollView>
+                </View>
+
+                <View style={styles.modalActions}>
+                    <TouchableOpacity onPress={() => {
+                        setModalVisible(false);
+                        setNewSquadName('');
+                        setSelectedMembers([]);
+                    }} style={styles.cancelBtn}>
+                        <Text style={styles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleCreateSquad} style={styles.createBtn}>
+                        <Text style={styles.createText}>Create ({selectedMembers.length})</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: {
-    paddingHorizontal: 24, paddingVertical: 16,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0'
-  },
-  title: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
-  subtitle: { fontSize: 13, color: '#64748B', fontWeight: '500', marginTop: 2 },
-  iconBtn: { padding: 10, backgroundColor: '#F1F5F9', borderRadius: 12 },
-  
-  content: { flex: 1, padding: 24 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
-  sectionTitle: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 1 },
-
-  // Cards
-  squadCard: {
-    backgroundColor: '#FFF', padding: 16, borderRadius: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small, marginBottom: 12
-  },
-  squadIcon: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9',
-    alignItems: 'center', justifyContent: 'center'
-  },
-  squadInitial: { fontSize: 16, fontWeight: '700', color: '#64748B' },
-
-  athleteCard: {
-    backgroundColor: '#FFF', padding: 12, borderRadius: 12,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderBottomWidth: 1, borderBottomColor: '#F1F5F9', marginBottom: 4
-  },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E2E8F0' },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  cardSub: { fontSize: 13, color: '#64748B' },
-  xpText: { fontSize: 12, fontWeight: '700', color: COLORS.primary, backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, paddingBottom: 16 },
+  title: { fontSize: 28, fontWeight: '800', color: '#0F172A' },
+  addBtn: { backgroundColor: COLORS.primary, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', ...SHADOWS.small },
+  tabs: { flexDirection: 'row', paddingHorizontal: 24, marginBottom: 16, gap: 12 },
+  tab: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F1F5F9' },
+  activeTab: { backgroundColor: COLORS.primary },
+  tabText: { fontWeight: '600', color: '#64748B' },
+  activeTabText: { color: '#FFF' },
+  list: { paddingHorizontal: 24, paddingBottom: 100 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, ...SHADOWS.small },
+  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  avatarText: { fontSize: 18, fontWeight: '700', color: '#475569' },
+  name: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  subText: { fontSize: 13, color: '#64748B' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
+  modalContent: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, maxHeight: '80%' },
+  modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 16 },
+  input: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16 },
+  label: { fontSize: 14, fontWeight: '700', color: '#64748B', marginBottom: 8 },
+  memberList: { maxHeight: 200, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12 },
+  memberRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  memberSelected: { backgroundColor: '#F0FDF4' },
+  memberName: { fontSize: 14, color: '#334155' },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  cancelBtn: { padding: 12 },
+  cancelText: { fontWeight: '700', color: '#64748B' },
+  createBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  createText: { fontWeight: '700', color: '#FFF' }
 });

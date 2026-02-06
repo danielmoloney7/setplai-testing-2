@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 venv_setplai/
+backend/setplai_db.db
+.env
+
+backend/app/__pycachce__/

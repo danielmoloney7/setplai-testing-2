@@ -7,8 +7,9 @@ from datetime import datetime
 
 from app.core.database import get_db
 from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id
-from app.models.user import User
+from app.models.user import User, SquadMember
 from app.core.security import get_current_user
+
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ class DrillPerformanceSchema(DrillPerformanceCreate):
 
 class SessionLogCreate(BaseModel):
     program_id: Optional[str] = None 
-    session_day_order: Optional[int] = None
+    session_id: Optional[int] = None
     duration_minutes: int
     rpe: int
     notes: Optional[str] = None
@@ -75,6 +76,13 @@ class UserResponse(BaseModel):
 
 class UserUpdateSchema(BaseModel):
     goals: List[str]
+
+class DrillCreate(BaseModel):
+    name: str
+    category: str
+    difficulty: str = "Intermediate"
+    description: Optional[str] = None
+    default_duration_min: int = 10
 
 # =======================
 # 2. ENDPOINTS
@@ -177,20 +185,16 @@ def create_program(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        print(f"DEBUG: Received Program: {program_in.title}") # Debug print
-
         # 1. Create Program
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
             creator_id=current_user.id,
-            # created_at is usually auto-handled by DB, but we can set it explicitly if needed
             created_at=datetime.utcnow() 
         )
         db.add(new_program)
         db.commit()
         db.refresh(new_program)
-        print(f"DEBUG: Created Program ID: {new_program.id}")
 
         # 2. Add Sessions
         for sess in program_in.sessions:
@@ -205,35 +209,44 @@ def create_program(
                 )
                 db.add(db_session)
 
-        # 3. Create Assignment
-        targets = program_in.assigned_to
-        
-        # Default to SELF if empty
-        if not targets or "SELF" in targets:
-            targets = [str(current_user.id)] # Ensure string for consistency in loop
+        # 3. ✅ SMART ASSIGNMENT LOGIC
+        raw_targets = program_in.assigned_to
+        final_player_ids = set() # Use a set to prevent duplicates
 
-        for player_id_str in targets:
-            if str(player_id_str).startswith("sq") or player_id_str == "SELF": 
-                continue 
+        # Handle Empty/Self Case
+        if not raw_targets or "SELF" in raw_targets:
+            final_player_ids.add(current_user.id)
+
+        # Process Targets (Squads vs Individuals)
+        for target_id in raw_targets:
+            if target_id == "SELF": 
+                continue
             
-            # DETERMINING STATUS
+           # Try to find a squad with this ID
+            squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
+            
+            if squad_members:
+                # It IS a squad, add all members
+                print(f"DEBUG: Unpacking Squad {target_id} -> {[m.player_id for m in squad_members]}")
+                for m in squad_members:
+                    final_player_ids.add(m.player_id)
+            else:
+                # It's likely a direct player ID
+                final_player_ids.add(target_id)
+
+        # 4. Create Assignments
+        for player_id in final_player_ids:
+            # Skip if we somehow got a non-user ID
+            if not player_id: continue
+
+            # Determine Status
             final_status = "PENDING"
-            
-            # Safe Integer Compare
-            try:
-                if int(player_id_str) == current_user.id:
-                    final_status = "ACTIVE"
-            except ValueError:
-                # If ID is not an int (e.g. UUID), assume it's valid but compare differently if needed
-                if str(player_id_str) == str(current_user.id):
-                    final_status = "ACTIVE"
-
-            if program_in.status == "ACTIVE":
+            if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
                 final_status = "ACTIVE"
 
             assignment = ProgramAssignment(
                 program_id=new_program.id,
-                player_id=int(player_id_str) if str(player_id_str).isdigit() else player_id_str, # Handle Int vs String IDs
+                player_id=str(player_id),
                 coach_id=current_user.id,
                 status=final_status,
                 assigned_at=datetime.utcnow()
@@ -241,13 +254,11 @@ def create_program(
             db.add(assignment)
 
         db.commit()
-        print("DEBUG: Successfully committed all records.")
         return {"status": "success", "program_id": new_program.id}
 
     except Exception as e:
         db.rollback() 
-        print(f"CRITICAL ERROR in create_program: {e}") # <--- LOOK AT YOUR TERMINAL FOR THIS
-        # Import traceback to see line number
+        print(f"CRITICAL ERROR in create_program: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
@@ -288,7 +299,7 @@ def get_my_active_program(
 # --- 5. UPDATE STATUS (Accept/Decline) ---
 @router.patch("/programs/{program_id}/status")
 def update_program_status(
-    program_id: int,
+    program_id: str,
     status_update: ProgramStatusUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -321,7 +332,7 @@ def create_session_log(
     new_log = SessionLog(
         player_id=current_user.id,
         program_id=session_data.program_id,
-        session_id=session_data.session_day_order,
+        session_id=session_data.session_id,
         duration_minutes=session_data.duration_minutes,
         rpe=session_data.rpe,
         notes=session_data.notes,
@@ -341,7 +352,8 @@ def create_session_log(
 
     # 3. ✅ UPDATE XP
     xp_earned = (session_data.duration_minutes or 0) * 10
-    current_user.xp = (current_user.xp or 0) + xp_earned
+    current_xp = current_user.xp if current_user.xp is not None else 0
+    current_user.xp = current_xp + xp_earned
     
     db.commit()
     return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned}
@@ -404,3 +416,74 @@ def create_session_log(
     db.commit()
     
     return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned, "total_xp": current_user.xp}
+
+
+@router.get("/athletes/{player_id}/logs", response_model=List[SessionLogSchema])
+def get_player_logs(
+    player_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # 1. Security Check: Ensure current user is a Coach
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can view athlete logs.")
+    
+    # 2. Optional: Check if player actually belongs to this coach
+    # (Skipping deep check for now to keep it flexible, but good for production)
+
+    # 3. Fetch Logs
+    logs = db.query(SessionLog).filter(SessionLog.player_id == player_id).order_by(desc(SessionLog.date_completed)).all()
+    return logs
+
+@router.get("/coach/activity")
+def get_coach_activity(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        return []
+    
+    # 1. Get all my players
+    players = db.query(User).filter(User.coach_id == current_user.id).all()
+    player_ids = [p.id for p in players]
+    
+    if not player_ids:
+        return []
+
+    # 2. Get recent logs for these players
+    logs = db.query(SessionLog).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
+    
+    # 3. Enrich with Player Name
+    results = []
+    for log in logs:
+        # Find player name from our local list
+        player = next((p for p in players if p.id == log.player_id), None)
+        player_name = player.name if player else "Unknown Athlete"
+        
+        # Serialize log and add name
+        log_dict = SessionLogSchema.from_orm(log).dict()
+        log_dict['player_name'] = player_name
+        results.append(log_dict)
+
+    return results
+
+@router.post("/drills")
+def create_drill(
+    drill_data: DrillCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can add drills.")
+
+    new_drill = Drill(
+        id=generate_id(),
+        name=drill_data.name,
+        category=drill_data.category,
+        difficulty=drill_data.difficulty,
+        description=drill_data.description
+    )
+    db.add(new_drill)
+    db.commit()
+    db.refresh(new_drill)
+    return new_drill

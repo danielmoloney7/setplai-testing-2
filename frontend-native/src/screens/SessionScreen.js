@@ -127,7 +127,7 @@ export default function SessionScreen({ route, navigation }) {
 
       const payload = {
         program_id: programId,
-        session_day_order: session.day_order || 1,
+        session_id: session.day_order || 1, // ✅ CHANGED: Key is now session_id
         duration_minutes: duration,
         rpe: rpe,
         notes: notes,

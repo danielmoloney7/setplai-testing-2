@@ -1,4 +1,4 @@
-import React from 'react';
+import React from 'react'; 
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Dumbbell, Users, Calendar, Grid, ChevronLeft } from 'lucide-react-native';
@@ -11,6 +11,16 @@ export default function CoachActionScreen({ navigation }) {
     { id: 'program', title: 'New Program', icon: Calendar, path: 'ProgramBuilder', desc: 'Build a training plan' },
     { id: 'squad_program', title: 'Squad Program', icon: Grid, path: 'ProgramBuilder', desc: 'Plan for specific numbers & courts' },
   ];
+
+  const handleNavigation = (item) => {
+    if (item.id === 'drill' || item.id === 'squad') {
+      // ✅ Navigate directly. The bar stays because they are sibling tabs.
+      navigation.navigate(item.path, { openModal: true });
+    } else {
+      // These still cover the bar (Standard Stack behavior)
+      navigation.navigate(item.path, { squadMode: item.id === 'squad_program' });
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -30,7 +40,7 @@ export default function CoachActionScreen({ navigation }) {
                         key={item.id} 
                         style={styles.card}
                         activeOpacity={0.7}
-                        onPress={() => navigation.navigate(item.path, { openModal: item.modal, squadMode: item.id === 'squad_program' })}
+                        onPress={() => handleNavigation(item)}
                     >
                         {/* Icon Box */}
                         <View style={styles.iconBox}>
@@ -51,29 +61,21 @@ export default function CoachActionScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // ✅ FIX: Light Background
   container: { flex: 1, backgroundColor: '#F8FAFC' }, 
-  
   header: { 
     paddingHorizontal: 24, paddingVertical: 16, 
     flexDirection: 'row', alignItems: 'center', gap: 16,
-    // No border needed for cleaner look, or very subtle
     borderBottomWidth: 0 
   },
-  // ✅ FIX: Dark Title Text
   title: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
   backBtn: { padding: 4 },
-
   scrollContent: { padding: 24 },
-  
   grid: { 
     flexDirection: 'row', 
     flexWrap: 'wrap', 
     justifyContent: 'space-between',
     gap: 16 
   },
-
-  // ✅ FIX: White Cards with Shadow
   card: { 
     width: '47%', 
     backgroundColor: '#FFFFFF', 
@@ -83,19 +85,16 @@ const styles = StyleSheet.create({
     borderColor: '#E2E8F0',
     alignItems: 'flex-start',
     minHeight: 160, 
-    ...SHADOWS.small // Subtle shadow for pop
+    ...SHADOWS.small 
   },
-
   iconBox: { 
     width: 50, height: 50, 
     borderRadius: 14, 
-    backgroundColor: '#F0FDF4', // Very light green background
+    backgroundColor: '#F0FDF4', 
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 16
   },
-
   textContainer: { flex: 1 },
-  // ✅ FIX: Dark Text for Readability
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 6 },
   cardDesc: { fontSize: 12, color: '#64748B', lineHeight: 18 }
 });

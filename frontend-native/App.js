@@ -11,6 +11,8 @@ import TeamScreen from './src/screens/TeamScreen';
 import DrillLibraryScreen from './src/screens/DrillLibraryScreen';
 import ProgramDetailScreen from './src/screens/ProgramDetailScreen';
 import AssessmentScreen from './src/screens/AssessmentScreen';
+import AthleteDetailScreen from './src/screens/AthleteDetailScreen';
+import SquadDetailScreen from './src/screens/SquadDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -45,11 +47,11 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        <Stack.Screen 
+        {/* <Stack.Screen 
           name="CoachAction" 
           component={CoachActionScreen} 
           options={{ headerShown: false, presentation: 'modal' }} // Nice modal effect
-        />
+        /> */}
 
         <Stack.Screen 
           name="Profile" 
@@ -57,27 +59,39 @@ export default function App() {
           options={{ headerShown: false, presentation: 'modal' }} // Optional: 'modal' looks nice for profile
         />
 
-        <Stack.Screen 
+        {/* <Stack.Screen 
           name="Team" 
           component={TeamScreen} 
-          options={{ headerShown: false }} // Optional: 'modal' looks nice for profile
+          options={{ headerShown: false , presentation: 'modal'}} // Optional: 'modal' looks nice for profile
         />
 
         <Stack.Screen 
           name="Drills" 
           component={DrillLibraryScreen} 
-          options={{ headerShown: false}} // Optional: 'modal' looks nice for profile
-        />
+          options={{ headerShown: false, presentation: 'modal'}} // Optional: 'modal' looks nice for profile
+        /> */}
 
         <Stack.Screen 
           name="ProgramDetail" 
           component={ProgramDetailScreen} 
           options={{ headerTitle: 'Program Details', headerBackTitle: 'Back' }} 
         />
-        
+
         <Stack.Screen 
           name="Assessment" 
           component={AssessmentScreen} 
+          options={{ headerShown: false }} 
+        />
+
+        <Stack.Screen 
+          name="AthleteDetail" 
+          component={AthleteDetailScreen} 
+          options={{ headerShown: false }} 
+        />
+
+        <Stack.Screen 
+          name="SquadDetail" 
+          component={SquadDetailScreen} 
           options={{ headerShown: false }} 
         />
 

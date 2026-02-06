@@ -6,18 +6,23 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList } from 'lucide-react-native';
+import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList, User } from 'lucide-react-native';
 
-import { fetchPrograms, fetchSessionLogs } from '../services/api'; 
+import { fetchPrograms, fetchSessionLogs, fetchSquads, fetchCoachActivity } from '../services/api'; 
 import { COLORS, SHADOWS } from '../constants/theme';
+import FeedCard from '../components/FeedCard'; // ✅ Import FeedCard
 
 export default function DashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState({ name: 'Athlete', role: 'PLAYER' }); 
   
-  // ✅ CHANGED: Now an array to hold multiple sessions
+  // Player State
   const [upNextSessions, setUpNextSessions] = useState([]); 
   const [pendingCount, setPendingCount] = useState(0);
+
+  // Coach State
+  const [mySquads, setMySquads] = useState([]);
+  const [recentActivity, setRecentActivity] = useState([]);
 
   // --- DATA LOADING ---
   const loadDashboard = async () => {
@@ -30,27 +35,9 @@ export default function DashboardScreen({ navigation }) {
         setUser({ name: name || 'Athlete', role: safeRole });
 
         if (safeRole === 'PLAYER') {
-            // 1. Fetch Programs AND Logs in parallel
-            const [myPrograms, myLogs] = await Promise.all([
-                fetchPrograms(),
-                fetchSessionLogs()
-            ]); 
-            
-            // 2. Count Pending
-            const pending = myPrograms.filter(p => 
-                (p.status || '').toUpperCase() === 'PENDING'
-            );
-            setPendingCount(pending.length);
-
-            // 3. Find Active
-            const active = myPrograms.filter(p => 
-                (p.status || '').toUpperCase() === 'ACTIVE'
-            );
-            
-            console.log(`Dashboard Debug: Found ${active.length} active programs.`);
-            
-            // ✅ CHANGED: Calculate for ALL active programs
-            calculateNextSessions(active, myLogs);
+            await loadPlayerDashboard();
+        } else {
+            await loadCoachDashboard();
         }
     } catch (error) {
         console.log("Dashboard Error:", error);
@@ -59,17 +46,38 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
+  const loadPlayerDashboard = async () => {
+      const [myPrograms, myLogs] = await Promise.all([
+          fetchPrograms(),
+          fetchSessionLogs()
+      ]); 
+      
+      const pending = myPrograms.filter(p => (p.status || '').toUpperCase() === 'PENDING');
+      setPendingCount(pending.length);
+
+      const active = myPrograms.filter(p => (p.status || '').toUpperCase() === 'ACTIVE');
+      calculateNextSessions(active, myLogs);
+  };
+
+  const loadCoachDashboard = async () => {
+      const [squadsData, activityData] = await Promise.all([
+          fetchSquads(),
+          fetchCoachActivity()
+      ]);
+      setMySquads(squadsData || []);
+      setRecentActivity(activityData || []);
+  };
+
   useFocusEffect(
     useCallback(() => { loadDashboard(); }, [])
   );
 
-  // --- LOGIC: FIND NEXT SESSIONS (ALL PROGRAMS) ---
+  // --- LOGIC: FIND NEXT SESSIONS (PLAYER) ---
   const calculateNextSessions = (activePrograms, logs) => {
       if (!activePrograms || activePrograms.length === 0) {
           setUpNextSessions([]);
           return;
       }
-
       // Sort by Newest First
       const sortedPrograms = activePrograms.sort((a, b) => {
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -79,28 +87,22 @@ export default function DashboardScreen({ navigation }) {
       });
 
       const upcoming = [];
-
-      // ✅ Loop through ALL active programs
       sortedPrograms.forEach(program => {
           const rawSchedule = program.schedule || program.sessions || [];
           if (rawSchedule.length === 0) return;
-
-          // 1. Check Logs for Completed Days for THIS program
           const completedDays = logs
               .filter(log => log.program_id === program.id)
               .map(log => log.session_id);
 
-          // 2. Find first incomplete day
           const nextDrill = rawSchedule.find(item => !completedDays.includes(item.day_order));
 
-          // 3. If found, add to list
           if (nextDrill) {
               const nextDayNum = nextDrill.day_order;
               const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
               const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes) || 0), 0);
 
               upcoming.push({
-                  uniqueId: `${program.id}_day_${nextDayNum}`, // React key
+                  uniqueId: `${program.id}_day_${nextDayNum}`,
                   title: `Day ${nextDayNum} Training`, 
                   programTitle: program.title,
                   duration: totalMins > 0 ? totalMins : 45,
@@ -115,17 +117,16 @@ export default function DashboardScreen({ navigation }) {
               });
           }
       });
-
       setUpNextSessions(upcoming);
   };
 
   const getInitials = (n) => n ? n[0].toUpperCase() : 'U';
 
-  // --- RENDERERS ---
-
+  // --- COACH VIEW ---
   const renderCoachView = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Coach Actions</Text>
+      {/* 1. Quick Actions */}
+      <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.grid}>
         <TouchableOpacity 
           style={[styles.actionCard, { backgroundColor: COLORS.primary }]}
@@ -143,9 +144,57 @@ export default function DashboardScreen({ navigation }) {
           <Text style={styles.actionText}>My Team</Text>
         </TouchableOpacity>
       </View>
+
+      {/* 2. Squads Horizontal Scroll */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>My Squads</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginHorizontal: -24}} contentContainerStyle={{paddingHorizontal: 24}}>
+          {mySquads.length > 0 ? (
+              mySquads.map(squad => (
+                <TouchableOpacity 
+                    key={squad.id} 
+                    style={styles.squadCard}
+                    onPress={() => navigation.navigate('SquadDetail', { squad })}
+                >
+                    <View style={styles.squadIcon}><Text style={styles.squadInitial}>{squad.name[0]}</Text></View>
+                    <Text style={styles.squadName}>{squad.name}</Text>
+                    <Text style={styles.squadCount}>{squad.member_count} Athletes</Text>
+                </TouchableOpacity>
+              ))
+          ) : (
+              <View style={styles.emptyBox}><Text style={styles.emptyText}>No squads yet.</Text></View>
+          )}
+          <TouchableOpacity style={[styles.squadCard, {borderStyle:'dashed', borderColor: COLORS.primary}]} onPress={() => navigation.navigate('Team')}>
+             <View style={[styles.squadIcon, {backgroundColor: '#F0FDF4'}]}><Plus size={24} color={COLORS.primary}/></View>
+             <Text style={[styles.squadName, {color: COLORS.primary}]}>Add Squad</Text>
+          </TouchableOpacity>
+      </ScrollView>
+
+      {/* 3. Recent Activity Feed */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Recent Activity</Text>
+      <View style={{ gap: 12 }}>
+          {recentActivity.length > 0 ? (
+              recentActivity.map(log => (
+                  <View key={log.id}>
+                      {/* Add Player Name Header above Card */}
+                      <View style={{flexDirection:'row', alignItems:'center', marginBottom: 4, marginLeft: 4}}>
+                          <User size={12} color="#64748B" />
+                          <Text style={{fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6}}>
+                              {log.player_name || 'Athlete'}
+                          </Text>
+                      </View>
+                      <FeedCard session={log} />
+                  </View>
+              ))
+          ) : (
+              <View style={styles.emptyBox}>
+                  <Text style={styles.emptyText}>No recent activity from your team.</Text>
+              </View>
+          )}
+      </View>
     </View>
   );
 
+  // --- PLAYER VIEW ---
   const renderPlayerView = () => (
     <View style={styles.playerContainer}>
         {/* 0. Assessment Call-to-Action */}
@@ -165,11 +214,13 @@ export default function DashboardScreen({ navigation }) {
             <ChevronRight size={20} color="#0284C7" />
         </TouchableOpacity>
 
-        {/* 1. Pending Invites Notification */}
+        {/* 1. Pending Invites */}
         {pendingCount > 0 && (
             <TouchableOpacity 
                 style={styles.inviteBanner}
-                onPress={() => navigation.navigate('Main', { screen: 'Programs' })} 
+                // ✅ FIX: Navigate to 'Main' stack -> 'Plans' tab (or 'Programs' if role is stuck)
+                // We use 'Plans' because that is what BottomTabNavigator names it for Players
+                onPress={() => navigation.navigate('Main', { screen: 'Plans' })} 
             >
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
                     <View style={styles.notifIcon}><Bell size={20} color="#B45309" /></View>
@@ -182,14 +233,14 @@ export default function DashboardScreen({ navigation }) {
             </TouchableOpacity>
         )}
 
-        {/* 2. Next Up Cards (List of Active Sessions) */}
+        {/* 2. Up Next */}
         <Text style={[styles.sectionHeader, { paddingHorizontal: 24 }]}>Up Next</Text>
         <View style={{ paddingHorizontal: 24 }}>
           {upNextSessions.length > 0 ? (
             upNextSessions.map((sessionItem) => (
                 <TouchableOpacity 
                     key={sessionItem.uniqueId}
-                    style={styles.upNextCard} // Uses marginBottom from style
+                    style={styles.upNextCard}
                     activeOpacity={0.9} 
                     onPress={() => navigation.navigate('Session', { 
                         session: sessionItem.fullSessionData, 
@@ -200,21 +251,13 @@ export default function DashboardScreen({ navigation }) {
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
                     <View style={styles.planBadge}><Text style={styles.planBadgeText}>Active Plan</Text></View>
                   </View>
-                  
                   <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
                       <View style={{flex: 1, marginRight: 12}}>
                         <Text style={styles.upNextTitle}>{sessionItem.title}</Text>
                         <Text style={styles.upNextSubtitle}>{sessionItem.programTitle}</Text>
-                        
                         <View style={styles.metaRow}>
-                            <View style={styles.metaItem}>
-                                <Clock size={14} color="#64748B" />
-                                <Text style={styles.metaText}>{sessionItem.duration} min</Text>
-                            </View>
-                            <View style={styles.metaItem}>
-                                <Dumbbell size={14} color="#64748B" />
-                                <Text style={styles.metaText}>{sessionItem.drillCount} Drills</Text>
-                            </View>
+                            <View style={styles.metaItem}><Clock size={14} color="#64748B" /><Text style={styles.metaText}>{sessionItem.duration} min</Text></View>
+                            <View style={styles.metaItem}><Dumbbell size={14} color="#64748B" /><Text style={styles.metaText}>{sessionItem.drillCount} Drills</Text></View>
                         </View>
                       </View>
                       <PlayCircle size={32} color={COLORS.primary} fill="#E0F2FE" style={{marginTop: 4}}/>
@@ -224,11 +267,10 @@ export default function DashboardScreen({ navigation }) {
           ) : (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>No active sessions.</Text>
-              <Text style={styles.subText}>Check your invites or create a new plan!</Text>
             </View>
           )}
         </View>
-
+        
         {/* 3. Quick Start */}
         <Text style={styles.sectionHeader}>Quick Start</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll} contentContainerStyle={{paddingHorizontal: 24}}>
@@ -298,21 +340,20 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 16 },
   section: { marginBottom: 24, paddingHorizontal: 24 },
   
-  // Banners
+  // Squad Cards
+  squadCard: { width: 140, padding: 16, backgroundColor: '#FFF', borderRadius: 16, marginRight: 12, alignItems: 'flex-start', borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
+  squadIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  squadInitial: { fontSize: 16, fontWeight: '700', color: '#64748B' },
+  squadName: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
+  squadCount: { fontSize: 12, color: '#64748B' },
+  emptyBox: { padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, borderStyle: 'dashed' },
+  
+  // Player Cards
   inviteBanner: { backgroundColor: '#FFF7ED', marginHorizontal: 24, marginBottom: 24, padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#FED7AA' },
   notifIcon: { width: 40, height: 40, backgroundColor: '#FFEDD5', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   inviteTitle: { fontSize: 15, fontWeight: '700', color: '#9A3412' },
   inviteSub: { fontSize: 13, color: '#C2410C' },
   
-  horizontalScroll: { marginBottom: 24, marginHorizontal: 0 },
-  
-  // Quick Card
-  quickCard: { backgroundColor: '#FFF', width: 160, padding: 16, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
-  iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  quickTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
-  quickDesc: { fontSize: 12, color: '#64748B', lineHeight: 16 },
-  
-  // Up Next Styles
   upNextCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium, marginBottom: 16 },
   upNextHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   tag: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
@@ -324,17 +365,18 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: 16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: '#475569', fontWeight: '500' },
-  
-  // Complete / Empty Styles
-  completeCard: { backgroundColor: '#F0FDF4', borderRadius: 20, padding: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#BBF7D0' },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
-  cardSub: { fontSize: 13, color: '#64748B', textAlign: 'center' },
-  
+
   emptyCard: { padding: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, borderStyle: 'dashed' },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
   subText: { color: '#CBD5E1', fontSize: 12, marginTop: 4 },
-  
+
   grid: { flexDirection: 'row', gap: 16 },
   actionCard: { flex: 1, backgroundColor: '#FFF', padding: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.card },
   actionText: { fontWeight: 'bold', fontSize: 16, color: '#334155' },
+  
+  horizontalScroll: { marginBottom: 24, marginHorizontal: 0 },
+  quickCard: { backgroundColor: '#FFF', width: 160, padding: 16, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
+  iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  quickTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
+  quickDesc: { fontSize: 12, color: '#64748B', lineHeight: 16 },
 });

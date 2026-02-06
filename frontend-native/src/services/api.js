@@ -151,4 +151,69 @@ export const fetchSessionLogs = async () => {
   }
 };
 
+export const fetchPlayerLogs = async (playerId) => {
+  try {
+    const response = await api.get(`/athletes/${playerId}/logs`);
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching player logs:", error);
+    return [];
+  }
+};
+
+// --- SQUAD ENDPOINTS ---
+export const fetchSquads = async () => {
+  try {
+    const response = await api.get('/squads');
+    return response.data;
+  } catch (error) {
+    console.error("Fetch Squads Error:", error);
+    return [];
+  }
+};
+
+export const createSquad = async (name, level, memberIds = []) => {
+  const response = await api.post('/squads', { 
+    name, 
+    level, 
+    initial_members: memberIds 
+  });
+  return response.data;
+};
+
+export const fetchSquadMembers = async (squadId) => {
+  const response = await api.get(`/squads/${squadId}/members`);
+  return response.data;
+};
+
+export const addMemberToSquad = async (squadId, playerId) => {
+  const response = await api.post(`/squads/${squadId}/members`, { player_id: playerId });
+  return response.data;
+};
+
+export const removeMemberFromSquad = async (squadId, playerId) => {
+  const response = await api.delete(`/squads/${squadId}/members/${playerId}`);
+  return response.data;
+};
+
+export const fetchCoachActivity = async () => {
+  try {
+    const response = await api.get('/coach/activity');
+    return response.data;
+  } catch (error) {
+    console.error("Fetch Coach Activity Error:", error);
+    return [];
+  }
+};
+
+export const createDrill = async (drillData) => {
+  try {
+    const response = await api.post('/drills', drillData);
+    return response.data;
+  } catch (error) {
+    console.error("Create Drill Error:", error);
+    throw error;
+  }
+};
+
 export default api;
