@@ -52,7 +52,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
           };
       }
       acc[day].items.push(item);
-      acc[day].totalMinutes += (item.duration_minutes || 0);
+      acc[day].totalMinutes += (parseInt(item.duration_minutes || item.targetDurationMin || item.duration) || 0);
       return acc;
   }, {});
 

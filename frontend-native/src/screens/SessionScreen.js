@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import api from '../services/api';
+import { ASSESSMENT_DRILLS } from '../constants/data';
 
 // --- HELPER: Format Time ---
 const formatTime = (seconds) => {
@@ -25,24 +26,35 @@ const getDifficultyColor = (level) => {
 export default function SessionScreen({ route, navigation }) {
   const { session, programId } = route.params || {};
   
-  // States: 'OVERVIEW' -> 'PREP' -> 'COUNTDOWN' -> 'ACTIVE' -> 'SUMMARY'
+  // States
   const [viewState, setViewState] = useState('OVERVIEW');
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
-  
-  // Timer & Countdown
   const [timeLeft, setTimeLeft] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [countDownValue, setCountDownValue] = useState(3);
   const timerRef = useRef(null);
 
-  // Data
+  // Data States
   const [drillLogs, setDrillLogs] = useState([]);
   const [rpe, setRpe] = useState(5);
   const [notes, setNotes] = useState('');
   const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [achievedValue, setAchievedValue] = useState('');
 
+  // ✅ 1. IDENTIFY THE CURRENT ITEM FIRST
   const currentItem = session?.items ? session.items[currentDrillIndex] : null;
-  // Robustly handle duration from different sources (DB vs Mock)
+
+  // ✅ 2. DEFINE 'drill' BY LOOKING UP THE DEFINITION
+  // This ensures 'drill' exists for the scoring check later
+  const drill = currentItem 
+    ? ASSESSMENT_DRILLS.find(d => d.id === (currentItem.drill_id || currentItem.drillId)) || null
+    : null;
+
+  // ✅ 3. DEFINE SCORING (Prioritize session-specific targets)
+  const drillScoring = (currentItem?.target_value || currentItem?.target_prompt)
+    ? { prompt: currentItem.target_prompt || "Reps Completed", target: currentItem.target_value }
+    : drill?.scoring;
+
   const currentDuration = currentItem ? (currentItem.duration_minutes || currentItem.targetDurationMin || 10) : 0;
 
   // --- TIMER LOGIC ---
@@ -55,7 +67,7 @@ export default function SessionScreen({ route, navigation }) {
       setIsTimerRunning(false);
       clearInterval(timerRef.current);
     }
-    return () => clearInterval(timerRef.current);
+    return () => clearInterval(timerRef.current);view
   }, [isTimerRunning, timeLeft, viewState]);
 
   // Countdown Logic
@@ -88,27 +100,22 @@ export default function SessionScreen({ route, navigation }) {
   const completeDrill = (outcome) => {
     if (!currentItem) return;
 
-    // ✅ FIX: Robustly find the drill ID.
-    // Backend sends 'drill_id'. Mock data might use 'drillId' or 'id'.
-    // We default to "unknown_drill" to prevent 422 crashes, but logged errors help debug.
     const safeDrillId = currentItem.drill_id || currentItem.drillId || currentItem.id || "unknown_drill";
     
-    if (safeDrillId === "unknown_drill") {
-        console.warn("⚠️ Warning: Drill ID missing for item:", currentItem);
-    }
-
     const newLog = {
       drill_id: safeDrillId,
       outcome: outcome,
-      achieved_value: 0
+      // Pass numeric input or 0 if empty
+      achieved_value: achievedValue !== '' ? parseInt(achievedValue, 10) : 0 
     };
     
-    // Add to local logs
+    // Ensure you use the correct state setter
     setDrillLogs(prev => [...prev, newLog]);
 
     if (currentDrillIndex < session.items.length - 1) {
       setCurrentDrillIndex(prev => prev + 1);
-      setViewState('PREP'); // Go to Prep for next drill
+      setAchievedValue(''); // ✅ Reset for next drill
+      setViewState('PREP');
     } else {
       setViewState('SUMMARY');
     }
@@ -300,10 +307,13 @@ export default function SessionScreen({ route, navigation }) {
     return (
       <View style={[styles.container, { backgroundColor: '#0F172A' }]}>
         <SafeAreaView style={styles.activeContent}>
-          <Text style={{ color: '#94A3B8', fontWeight: '600' }}>Drill {currentDrillIndex + 1} of {session.items.length}</Text>
-          <Text style={[styles.prepTitle, { color: '#FFF', textAlign: 'center', marginTop: 10, fontSize: 28 }]}>{currentItem.drill_name}</Text>
+          <Text style={{ color: '#94A3B8', fontWeight: '600' }}>
+            Drill {currentDrillIndex + 1} of {session.items.length}
+          </Text>
+          <Text style={[styles.prepTitle, { color: '#FFF', textAlign: 'center', marginTop: 10, fontSize: 28 }]}>
+            {currentItem.drill_name}
+          </Text>
           
-          {/* Circular Timer */}
           <View style={styles.timerCircle}>
             <Text style={styles.timerText}>{formatTime(timeLeft)}</Text>
             <TouchableOpacity onPress={() => setIsTimerRunning(!isTimerRunning)} style={styles.playPauseBtn}>
@@ -311,14 +321,28 @@ export default function SessionScreen({ route, navigation }) {
             </TouchableOpacity>
           </View>
 
-          {/* Floating Instructions */}
-          <View style={styles.activeInstructionBox}>
-            <Text style={{color: '#E2E8F0', fontSize: 16, textAlign: 'center'}}>
-                {currentItem.notes || "Focus on form"}
-            </Text>
-          </View>
+          {/* ✅ Check for drillScoring (library OR session target) */}
+          {drillScoring ? (
+            <View style={styles.numericFeedbackContainer}>
+              <Text style={styles.numericPrompt}>{drillScoring.prompt}</Text>
+              <TextInput
+                style={styles.numericInput}
+                keyboardType="numeric"
+                value={achievedValue}
+                onChangeText={setAchievedValue}
+                placeholder="0"
+                placeholderTextColor="#64748B"
+              />
+              <Text style={styles.targetLabel}>Target: {drillScoring.target}</Text>
+            </View>
+          ) : (
+            <View style={styles.activeInstructionBox}>
+              <Text style={{color: '#E2E8F0', fontSize: 16, textAlign: 'center'}}>
+                  {currentItem.notes || "Focus on form"}
+              </Text>
+            </View>
+          )}
 
-          {/* Action Buttons */}
           <View style={styles.actionRow}>
             <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#EF4444'}]} onPress={() => completeDrill('fail')}>
               <ThumbsDown color="#FFF" />
@@ -454,5 +478,38 @@ const styles = StyleSheet.create({
   rpeBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   rpeBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   rpeText: { fontWeight: '700', fontSize: 16, color: '#64748B' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' }
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  numericFeedbackContainer: {
+    width: '100%',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 20,
+  },
+  numericPrompt: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center'
+  },
+  numericInput: {
+    backgroundColor: '#FFF',
+    width: 120,
+    height: 60,
+    borderRadius: 12,
+    fontSize: 32,
+    fontWeight: '800',
+    textAlign: 'center',
+    color: '#0F172A',
+  },
+  targetLabel: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+    textTransform: 'uppercase'
+  },
 });

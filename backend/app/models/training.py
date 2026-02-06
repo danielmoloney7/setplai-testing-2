@@ -12,15 +12,19 @@ def generate_id():
 class Drill(Base):
     __tablename__ = "drills"
 
-    # CHANGE: Integer -> String, with UUID default
     id = Column(String, primary_key=True, default=generate_id)
     name = Column(String(255), index=True)
-    category = Column(String(50))  # e.g., "Serve", "Forehand"
-    difficulty = Column(String(20)) # "Beginner", "Advanced"
+    category = Column(String(50))  
+    difficulty = Column(String(20)) 
     description = Column(Text)
     default_duration_min = Column(Integer, default=10)
     video_url = Column(String(500), nullable=True)
     is_premium = Column(Boolean, default=False)
+    # ✅ NEW FIELDS: For performance tracking
+    # target_value: e.g., 20 (reps/rally)
+    target_value = Column(Integer, nullable=True)
+    # target_prompt: e.g., "How many shots landed deep?"
+    target_prompt = Column(String(255), nullable=True)
 
 class Program(Base):
     __tablename__ = "programs"
@@ -47,6 +51,8 @@ class ProgramSession(Base):
     drill_name = Column(String(255))
     duration_minutes = Column(Integer)
     notes = Column(Text, nullable=True)
+    target_value = Column(Integer, nullable=True)
+    target_prompt = Column(String(255), nullable=True)
     
     program = relationship("Program", back_populates="sessions")
 

@@ -18,14 +18,17 @@ def seed_data():
     drills = [
         Drill(id="d1", name="Wide Serve Targeting", category="Serve", difficulty="Intermediate", 
               description="Hit 10 serves to the deuce wide corner, then 10 to ad wide.", 
+              target_value = 10,
               default_duration_min=15, video_url="https://media.giphy.com/media/3o6Zt8qDiPE2d3kAzA/giphy.gif"),
         
         Drill(id="d2", name="T-Serve Precision", category="Serve", difficulty="Advanced", 
               description="Focus on hitting the T-line. 20 reps each side.", 
+              target_value = 10,
               default_duration_min=15, video_url="https://media.giphy.com/media/l0HlJDaeqNXVcWWfq/giphy.gif"),
 
         Drill(id="d3", name="Cross-Court Forehand Rally", category="Forehand", difficulty="Intermediate", 
               description="Sustain a cross-court rally for 20 balls without error.", 
+              target_value = 20,
               default_duration_min=10, video_url="https://media.giphy.com/media/3o7TKrEzvJbsQNtF5u/giphy.gif"),
 
         Drill(id="d7", name="Volley-Volley Reaction", category="Volley", difficulty="Advanced", 
@@ -58,8 +61,8 @@ def seed_data():
 
     sessions = [
         ProgramSession(program_id=program_id, day_order=1, drill_name="Dynamic Warmup", duration_minutes=10, notes="Focus on form"),
-        ProgramSession(program_id=program_id, day_order=1, drill_name="Cross-Court Forehand Rally", duration_minutes=15, notes="Keep depth"),
-        ProgramSession(program_id=program_id, day_order=2, drill_name="Wide Serve Targeting", duration_minutes=20, notes="Hit your spots")
+        ProgramSession(program_id=program_id, day_order=1, drill_name="Cross-Court Forehand Rally", duration_minutes=15, target_value = 20, notes="Keep depth"),
+        ProgramSession(program_id=program_id, day_order=2, drill_name="Wide Serve Targeting", duration_minutes=20, target_value = 10, notes="Hit your spots")
     ]
     db.add_all(sessions)
     

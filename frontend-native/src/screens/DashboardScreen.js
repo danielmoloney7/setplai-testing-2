@@ -10,7 +10,7 @@ import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCirc
 
 import { fetchPrograms, fetchSessionLogs, fetchSquads, fetchCoachActivity } from '../services/api'; 
 import { COLORS, SHADOWS } from '../constants/theme';
-import FeedCard from '../components/FeedCard'; // ✅ Import FeedCard
+import FeedCard from '../components/FeedCard'; 
 
 export default function DashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -78,7 +78,7 @@ export default function DashboardScreen({ navigation }) {
           setUpNextSessions([]);
           return;
       }
-      // Sort by Newest First
+      
       const sortedPrograms = activePrograms.sort((a, b) => {
           const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
           const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -90,6 +90,7 @@ export default function DashboardScreen({ navigation }) {
       sortedPrograms.forEach(program => {
           const rawSchedule = program.schedule || program.sessions || [];
           if (rawSchedule.length === 0) return;
+          
           const completedDays = logs
               .filter(log => log.program_id === program.id)
               .map(log => log.session_id);
@@ -99,13 +100,19 @@ export default function DashboardScreen({ navigation }) {
           if (nextDrill) {
               const nextDayNum = nextDrill.day_order;
               const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
-              const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes) || 0), 0);
+              
+              // ✅ FALLBACK MAPPING: Support duration_minutes (Backend) and targetDurationMin (Web/Gemini)
+              const totalMins = sessionDrills.reduce((sum, d) => 
+                  sum + (parseInt(d.duration_minutes || d.targetDurationMin || d.duration || 0)), 0
+              );
 
               upcoming.push({
                   uniqueId: `${program.id}_day_${nextDayNum}`,
                   title: `Day ${nextDayNum} Training`, 
-                  programTitle: program.title,
-                  duration: totalMins > 0 ? totalMins : 45,
+                  // ✅ FALLBACK: Support coach_name (Backend) and assignedBy (Web types)
+                  programTitle: program.title || "Untitled Program",
+                  coachName: program.coach_name || "Self-Guided",
+                  duration: totalMins > 0 ? totalMins : 15,
                   drillCount: sessionDrills.length,
                   programId: program.id,
                   fullSessionData: {
@@ -125,7 +132,6 @@ export default function DashboardScreen({ navigation }) {
   // --- COACH VIEW ---
   const renderCoachView = () => (
     <View style={styles.section}>
-      {/* 1. Quick Actions */}
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.grid}>
         <TouchableOpacity 
@@ -145,7 +151,6 @@ export default function DashboardScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* 2. Squads Horizontal Scroll */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>My Squads</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginHorizontal: -24}} contentContainerStyle={{paddingHorizontal: 24}}>
           {mySquads.length > 0 ? (
@@ -169,13 +174,11 @@ export default function DashboardScreen({ navigation }) {
           </TouchableOpacity>
       </ScrollView>
 
-      {/* 3. Recent Activity Feed */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Recent Activity</Text>
       <View style={{ gap: 12 }}>
           {recentActivity.length > 0 ? (
               recentActivity.map(log => (
                   <View key={log.id}>
-                      {/* Add Player Name Header above Card */}
                       <View style={{flexDirection:'row', alignItems:'center', marginBottom: 4, marginLeft: 4}}>
                           <User size={12} color="#64748B" />
                           <Text style={{fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6}}>
@@ -197,7 +200,6 @@ export default function DashboardScreen({ navigation }) {
   // --- PLAYER VIEW ---
   const renderPlayerView = () => (
     <View style={styles.playerContainer}>
-        {/* 0. Assessment Call-to-Action */}
         <TouchableOpacity 
             style={[styles.inviteBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD' }]}
             onPress={() => navigation.navigate('Assessment')}
@@ -214,12 +216,9 @@ export default function DashboardScreen({ navigation }) {
             <ChevronRight size={20} color="#0284C7" />
         </TouchableOpacity>
 
-        {/* 1. Pending Invites */}
         {pendingCount > 0 && (
             <TouchableOpacity 
                 style={styles.inviteBanner}
-                // ✅ FIX: Navigate to 'Main' stack -> 'Plans' tab (or 'Programs' if role is stuck)
-                // We use 'Plans' because that is what BottomTabNavigator names it for Players
                 onPress={() => navigation.navigate('Main', { screen: 'Plans' })} 
             >
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
@@ -233,7 +232,6 @@ export default function DashboardScreen({ navigation }) {
             </TouchableOpacity>
         )}
 
-        {/* 2. Up Next */}
         <Text style={[styles.sectionHeader, { paddingHorizontal: 24 }]}>Up Next</Text>
         <View style={{ paddingHorizontal: 24 }}>
           {upNextSessions.length > 0 ? (
@@ -271,7 +269,6 @@ export default function DashboardScreen({ navigation }) {
           )}
         </View>
         
-        {/* 3. Quick Start */}
         <Text style={styles.sectionHeader}>Quick Start</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll} contentContainerStyle={{paddingHorizontal: 24}}>
           <TouchableOpacity style={styles.quickCard}>
