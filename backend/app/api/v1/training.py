@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload  # ✅ ADDED joinedload
+from sqlalchemy.orm import Session, joinedload 
 from sqlalchemy import func, desc
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -38,7 +38,7 @@ class ProgramCreateSchema(BaseModel):
     sessions: List[SessionSchema]
 
 class ProgramStatusUpdate(BaseModel):
-    status: str  # 'ACTIVE', 'DECLINED', 'ARCHIVED'
+    status: str 
 
 # --- Session Logging Schemas ---
 class DrillPerformanceCreate(BaseModel):
@@ -48,6 +48,8 @@ class DrillPerformanceCreate(BaseModel):
 
 class DrillPerformanceSchema(DrillPerformanceCreate):
     id: str
+    drill_name: Optional[str] = None # ✅ ADDED: Field for the drill name
+    
     class Config:
         from_attributes = True
 
@@ -87,10 +89,41 @@ class DrillCreate(BaseModel):
     default_duration_min: int = 10
 
 # =======================
-# 2. ENDPOINTS
+# 2. HELPER FUNCTIONS
 # =======================
 
-# --- 1. SEED DRILLS ---
+def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionLogSchema]:
+    """
+    Takes raw DB logs, fetches drill names, and returns enriched Pydantic models.
+    """
+    if not logs:
+        return []
+
+    # 1. Fetch all drills for lookup
+    all_drills = db.query(Drill).all()
+    drill_map = {d.id: d.name for d in all_drills}
+
+    # 2. Convert and Enrich
+    results = []
+    for log in logs:
+        # Convert to Pydantic model (using from_orm / model_validate logic)
+        log_model = SessionLogSchema.model_validate(log)
+        
+        # Inject Drill Names
+        for perf in log_model.drill_performances:
+            if perf.drill_id in drill_map:
+                perf.drill_name = drill_map[perf.drill_id]
+            else:
+                perf.drill_name = "Custom Drill" # Fallback if ID not found
+        
+        results.append(log_model)
+    
+    return results
+
+# =======================
+# 3. ENDPOINTS
+# =======================
+
 @router.post("/seed-drills")
 def seed_drills(db: Session = Depends(get_db)):
     if db.query(Drill).first():
@@ -111,14 +144,12 @@ def seed_drills(db: Session = Depends(get_db)):
 def get_drills(db: Session = Depends(get_db)):
     return db.query(Drill).all()
 
-# --- 2. GET ALL PROGRAMS (Fixed for Status Logic) ---
 @router.get("/programs")
 def get_programs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # Fetch logic
         if "COACH" in current_user.role.upper():
             programs = db.query(Program).filter(Program.creator_id == current_user.id).all()
         else:
@@ -131,7 +162,6 @@ def get_programs(
         
         results = []
         for p in programs:
-            # Determine Status
             status = "PENDING"
             if "COACH" in current_user.role.upper():
                 status = "ACTIVE"
@@ -143,7 +173,6 @@ def get_programs(
                 if assignment:
                     status = assignment.status
 
-            # Fetch Relations Manually
             assignments = db.query(ProgramAssignment).filter(ProgramAssignment.program_id == p.id).all()
             assigned_ids = [a.player_id for a in assignments]
 
@@ -181,7 +210,6 @@ def get_programs(
         print(f"Error fetching programs: {e}")
         raise HTTPException(500, f"Failed to fetch programs: {str(e)}")
 
-# --- 3. CREATE PROGRAM (FIXED: Handles Self-Assignment & Active Status) ---
 @router.post("/programs")
 def create_program(
     program_in: ProgramCreateSchema, 
@@ -189,7 +217,6 @@ def create_program(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # 1. Create Program
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
@@ -200,7 +227,6 @@ def create_program(
         db.commit()
         db.refresh(new_program)
 
-        # 2. Add Sessions
         for sess in program_in.sessions:
             for drill in sess.drills: 
                 db_session = ProgramSession(
@@ -215,37 +241,27 @@ def create_program(
                 )
                 db.add(db_session)
 
-        # 3. ✅ SMART ASSIGNMENT LOGIC
         raw_targets = program_in.assigned_to
-        final_player_ids = set() # Use a set to prevent duplicates
+        final_player_ids = set()
 
-        # Handle Empty/Self Case
         if not raw_targets or "SELF" in raw_targets:
             final_player_ids.add(current_user.id)
 
-        # Process Targets (Squads vs Individuals)
         for target_id in raw_targets:
             if target_id == "SELF": 
                 continue
             
-           # Try to find a squad with this ID
             squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
             
             if squad_members:
-                # It IS a squad, add all members
-                print(f"DEBUG: Unpacking Squad {target_id} -> {[m.player_id for m in squad_members]}")
                 for m in squad_members:
                     final_player_ids.add(m.player_id)
             else:
-                # It's likely a direct player ID
                 final_player_ids.add(target_id)
 
-        # 4. Create Assignments
         for player_id in final_player_ids:
-            # Skip if we somehow got a non-user ID
             if not player_id: continue
 
-            # Determine Status
             final_status = "PENDING"
             if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
                 final_status = "ACTIVE"
@@ -268,14 +284,12 @@ def create_program(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
-    
-# --- 4. GET ACTIVE PROGRAM (The "Dashboard" Check) ---
+
 @router.get("/my-active-program")
 def get_my_active_program(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Find the most recent ACTIVE assignment
     assignment = db.query(ProgramAssignment).filter(
         ProgramAssignment.player_id == current_user.id,
         ProgramAssignment.status == "ACTIVE"
@@ -294,7 +308,7 @@ def get_my_active_program(
     coach = db.query(User).filter(User.id == assignment.coach_id).first()
     
     return {
-        "id": program.id, # Important for tracking
+        "id": program.id,
         "title": program.title,
         "description": program.description,
         "coach_name": coach.name if coach else "Coach",
@@ -302,7 +316,6 @@ def get_my_active_program(
         "schedule": sessions_data 
     }
 
-# --- 5. UPDATE STATUS (Accept/Decline) ---
 @router.patch("/programs/{program_id}/status")
 def update_program_status(
     program_id: str,
@@ -322,7 +335,6 @@ def update_program_status(
     db.commit()
     return {"status": "success", "new_status": assignment.status}
 
-# --- 6. MISC ENDPOINTS ---
 @router.get("/my-athletes", response_model=List[UserResponse])
 def get_my_athletes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "COACH": return []
@@ -334,7 +346,10 @@ def create_session_log(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 1. Create Log (Existing logic)
+    print(f"👉 RECEIVING SESSION ID: {session_data.session_id}")
+    print(f"👉 DRILLS: {len(session_data.drill_performances)}")
+
+    # 1. Create Log
     new_log = SessionLog(
         player_id=current_user.id,
         program_id=session_data.program_id,
@@ -345,10 +360,10 @@ def create_session_log(
         date_completed=datetime.utcnow()
     )
     db.add(new_log)
-    db.commit() # ✅ Commit first to generate ID
+    db.commit()
     db.refresh(new_log)
     
-    # 2. Add Performances (Existing logic)
+    # 2. Add Performances
     for perf in session_data.drill_performances:
         db_perf = DrillPerformance(
             session_log_id=new_log.id,
@@ -358,23 +373,25 @@ def create_session_log(
         )
         db.add(db_perf)
 
-    # 3. ✅ UPDATE XP
+    # 3. Update XP
     xp_earned = (session_data.duration_minutes or 0) * 10
-    current_xp = current_user.xp if current_user.xp is not None else 0
-    current_user.xp = current_xp + xp_earned
+    current_user.xp = (current_user.xp or 0) + xp_earned
     
     db.commit()
+    print("✅ SAVED")
     return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned}
 
-# 4. ✅ ADD PROFILE ENDPOINT (To fetch XP)
 @router.get("/my-profile", response_model=UserResponse)
 def get_my_profile(current_user: User = Depends(get_current_user)):
     return current_user
 
 @router.get("/my-session-logs", response_model=List[SessionLogSchema])
 def get_my_session_logs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # ✅ FIX: Use joinedload to fetch nested drill performances
-    return db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == current_user.id).order_by(desc(SessionLog.date_completed)).all()
+    # Fetch logs with joined drills
+    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == current_user.id).order_by(desc(SessionLog.date_completed)).all()
+    
+    # Enrich with Drill Names using helper
+    return enrich_logs_with_names(logs, db)
 
 @router.put("/my-profile")
 def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -384,8 +401,7 @@ def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depen
 
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
-    return [] # Simplified for now
-
+    return []
 
 @router.get("/athletes/{player_id}/logs", response_model=List[SessionLogSchema])
 def get_player_logs(
@@ -393,14 +409,12 @@ def get_player_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 1. Security Check: Ensure current user is a Coach
     if current_user.role != "COACH":
         raise HTTPException(403, "Only coaches can view athlete logs.")
     
-    # 3. Fetch Logs with nested performance data
-    # ✅ FIX: Use joinedload
     logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == player_id).order_by(desc(SessionLog.date_completed)).all()
-    return logs
+    
+    return enrich_logs_with_names(logs, db)
 
 @router.get("/coach/activity")
 def get_coach_activity(
@@ -410,26 +424,25 @@ def get_coach_activity(
     if current_user.role != "COACH":
         return []
     
-    # 1. Get all my players
     players = db.query(User).filter(User.coach_id == current_user.id).all()
     player_ids = [p.id for p in players]
     
     if not player_ids:
         return []
 
-    # 2. Get recent logs for these players
-    # ✅ FIX: Use joinedload
     logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
     
-    # 3. Enrich with Player Name
+    # Enrich with Drill Names first
+    enriched_logs = enrich_logs_with_names(logs, db)
+    
+    # Add Player Names (Need to return dicts, not Pydantic models here since schema doesn't have player_name)
     results = []
-    for log in logs:
-        # Find player name from our local list
-        player = next((p for p in players if p.id == log.player_id), None)
+    for log_model, original_log in zip(enriched_logs, logs):
+        player = next((p for p in players if p.id == original_log.player_id), None)
         player_name = player.name if player else "Unknown Athlete"
         
-        # Serialize log and add name
-        log_dict = SessionLogSchema.from_orm(log).dict()
+        # Convert back to dict to add extra field
+        log_dict = log_model.model_dump()
         log_dict['player_name'] = player_name
         results.append(log_dict)
 
