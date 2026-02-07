@@ -112,7 +112,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
-                    // ✅ LOOKUP REAL DRILL NAME (Fixes "d9" display issue)
+                    // Lookup the real drill to get its default targets
                     const realDrill = availableDrills.find(d => d.id === (item.drillId || item.id));
                     const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Drill");
 
@@ -120,7 +120,10 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                         drill_id: item.drillId || item.id, 
                         drill_name: prettyName, 
                         duration: parseInt(item.duration || item.targetDurationMin || 15),
-                        notes: item.notes || ""
+                        notes: item.notes || "",
+                        // ✅ ADD THIS: Pass the target info to the backend
+                        target_value: realDrill?.target_value || item.target_value || null,
+                        target_prompt: realDrill?.target_prompt || item.target_prompt || null
                     };
                 })
             }))

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload  # ✅ ADDED joinedload
 from sqlalchemy import func, desc
 from typing import List, Optional
 from pydantic import BaseModel
@@ -23,6 +23,8 @@ class DrillItemSchema(BaseModel):
     drill_name: str
     duration: int
     notes: Optional[str] = None
+    target_value: Optional[int] = None 
+    target_prompt: Optional[str] = None 
 
 class SessionSchema(BaseModel):
     day: int
@@ -47,7 +49,7 @@ class DrillPerformanceCreate(BaseModel):
 class DrillPerformanceSchema(DrillPerformanceCreate):
     id: str
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SessionLogCreate(BaseModel):
     program_id: Optional[str] = None 
@@ -63,7 +65,7 @@ class SessionLogSchema(SessionLogCreate):
     drill_performances: List[DrillPerformanceSchema] = []
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserResponse(BaseModel):
     id: str
@@ -168,7 +170,9 @@ def get_programs(
                         "drill_id": s.drill_id,
                         "drill_name": s.drill_name,
                         "duration_minutes": s.duration_minutes,
-                        "notes": s.notes
+                        "notes": s.notes,
+                        "target_value": s.target_value,
+                        "target_prompt": s.target_prompt
                     } for s in sessions
                 ]
             })
@@ -205,7 +209,9 @@ def create_program(
                     drill_id=drill.drill_id,
                     drill_name=drill.drill_name,
                     duration_minutes=drill.duration,
-                    notes=drill.notes or ""
+                    notes=drill.notes or "",
+                    target_value=drill.target_value,
+                    target_prompt=drill.target_prompt
                 )
                 db.add(db_session)
 
@@ -339,6 +345,8 @@ def create_session_log(
         date_completed=datetime.utcnow()
     )
     db.add(new_log)
+    db.commit() # ✅ Commit first to generate ID
+    db.refresh(new_log)
     
     # 2. Add Performances (Existing logic)
     for perf in session_data.drill_performances:
@@ -365,7 +373,8 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
 
 @router.get("/my-session-logs", response_model=List[SessionLogSchema])
 def get_my_session_logs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(SessionLog).filter(SessionLog.player_id == current_user.id).order_by(desc(SessionLog.date_completed)).all()
+    # ✅ FIX: Use joinedload to fetch nested drill performances
+    return db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == current_user.id).order_by(desc(SessionLog.date_completed)).all()
 
 @router.put("/my-profile")
 def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -376,46 +385,6 @@ def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depen
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
     return [] # Simplified for now
-
-@router.post("/sessions")
-def create_session_log(
-    session_data: SessionLogCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    # 1. Create Log
-    new_log = SessionLog(
-        player_id=current_user.id,
-        program_id=session_data.program_id,
-        session_id=session_data.session_day_order,
-        duration_minutes=session_data.duration_minutes,
-        rpe=session_data.rpe,
-        notes=session_data.notes,
-        date_completed=datetime.utcnow()
-    )
-    db.add(new_log)
-    
-    # 2. Add Performances
-    for perf in session_data.drill_performances:
-        db_perf = DrillPerformance(
-            session_log_id=new_log.id,
-            drill_id=perf.drill_id,
-            outcome=perf.outcome,
-            achieved_value=perf.achieved_value
-        )
-        db.add(db_perf)
-
-    # 3. ✅ UPDATE USER XP (Now fully functional)
-    # Logic: 10 XP per minute trained
-    xp_earned = (session_data.duration_minutes or 0) * 10
-    
-    # Add to current XP (handle None case safely)
-    current_user.xp = (current_user.xp or 0) + xp_earned
-    
-    # The 'current_user' object is tracked by the session, so commit saves changes to User too
-    db.commit()
-    
-    return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned, "total_xp": current_user.xp}
 
 
 @router.get("/athletes/{player_id}/logs", response_model=List[SessionLogSchema])
@@ -428,11 +397,9 @@ def get_player_logs(
     if current_user.role != "COACH":
         raise HTTPException(403, "Only coaches can view athlete logs.")
     
-    # 2. Optional: Check if player actually belongs to this coach
-    # (Skipping deep check for now to keep it flexible, but good for production)
-
-    # 3. Fetch Logs
-    logs = db.query(SessionLog).filter(SessionLog.player_id == player_id).order_by(desc(SessionLog.date_completed)).all()
+    # 3. Fetch Logs with nested performance data
+    # ✅ FIX: Use joinedload
+    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == player_id).order_by(desc(SessionLog.date_completed)).all()
     return logs
 
 @router.get("/coach/activity")
@@ -451,7 +418,8 @@ def get_coach_activity(
         return []
 
     # 2. Get recent logs for these players
-    logs = db.query(SessionLog).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
+    # ✅ FIX: Use joinedload
+    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
     
     # 3. Enrich with Player Name
     results = []

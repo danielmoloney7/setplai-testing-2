@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Animated, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb } from 'lucide-react-native';
+import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb, Check } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import api from '../services/api';
 import { ASSESSMENT_DRILLS } from '../constants/data';
@@ -26,33 +26,34 @@ const getDifficultyColor = (level) => {
 export default function SessionScreen({ route, navigation }) {
   const { session, programId } = route.params || {};
   
-  // States
+  // States: 'OVERVIEW' -> 'PREP' -> 'COUNTDOWN' -> 'ACTIVE' -> 'FEEDBACK' -> 'SUMMARY'
   const [viewState, setViewState] = useState('OVERVIEW');
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
+  
+  // Timer & Countdown
   const [timeLeft, setTimeLeft] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [countDownValue, setCountDownValue] = useState(3);
   const timerRef = useRef(null);
 
-  // Data States
+  // Data
   const [drillLogs, setDrillLogs] = useState([]);
   const [rpe, setRpe] = useState(5);
   const [notes, setNotes] = useState('');
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [achievedValue, setAchievedValue] = useState('');
 
-  // ✅ 1. IDENTIFY THE CURRENT ITEM FIRST
+  // 1. Identify current item
   const currentItem = session?.items ? session.items[currentDrillIndex] : null;
 
-  // ✅ 2. DEFINE 'drill' BY LOOKING UP THE DEFINITION
-  // This ensures 'drill' exists for the scoring check later
+  // 2. Look up global definition
   const drill = currentItem 
     ? ASSESSMENT_DRILLS.find(d => d.id === (currentItem.drill_id || currentItem.drillId)) || null
     : null;
 
-  // ✅ 3. DEFINE SCORING (Prioritize session-specific targets)
+  // 3. Define Scoring
   const drillScoring = (currentItem?.target_value || currentItem?.target_prompt)
-    ? { prompt: currentItem.target_prompt || "Reps Completed", target: currentItem.target_value }
+    ? { prompt: currentItem.target_prompt || "Target", target: currentItem.target_value }
     : drill?.scoring;
 
   const currentDuration = currentItem ? (currentItem.duration_minutes || currentItem.targetDurationMin || 10) : 0;
@@ -67,7 +68,7 @@ export default function SessionScreen({ route, navigation }) {
       setIsTimerRunning(false);
       clearInterval(timerRef.current);
     }
-    return () => clearInterval(timerRef.current);view
+    return () => clearInterval(timerRef.current);
   }, [isTimerRunning, timeLeft, viewState]);
 
   // Countdown Logic
@@ -77,7 +78,6 @@ export default function SessionScreen({ route, navigation }) {
         const timer = setTimeout(() => setCountDownValue(p => p - 1), 1000);
         return () => clearTimeout(timer);
       } else {
-        // Countdown finished, start actual drill
         setViewState('ACTIVE');
         setTimeLeft(currentDuration * 60);
         setIsTimerRunning(true);
@@ -97,6 +97,11 @@ export default function SessionScreen({ route, navigation }) {
     setViewState('COUNTDOWN');
   };
 
+  const handleFinishDrill = () => {
+    setIsTimerRunning(false);
+    setViewState('FEEDBACK'); // ✅ Move to Feedback instead of staying on Active
+  };
+
   const completeDrill = (outcome) => {
     if (!currentItem) return;
 
@@ -105,16 +110,14 @@ export default function SessionScreen({ route, navigation }) {
     const newLog = {
       drill_id: safeDrillId,
       outcome: outcome,
-      // Pass numeric input or 0 if empty
       achieved_value: achievedValue !== '' ? parseInt(achievedValue, 10) : 0 
     };
     
-    // Ensure you use the correct state setter
     setDrillLogs(prev => [...prev, newLog]);
 
     if (currentDrillIndex < session.items.length - 1) {
       setCurrentDrillIndex(prev => prev + 1);
-      setAchievedValue(''); // ✅ Reset for next drill
+      setAchievedValue(''); 
       setViewState('PREP');
     } else {
       setViewState('SUMMARY');
@@ -134,27 +137,20 @@ export default function SessionScreen({ route, navigation }) {
 
       const payload = {
         program_id: programId,
-        session_id: session.day_order || 1, // ✅ CHANGED: Key is now session_id
+        session_id: session.day_order || 1,
         duration_minutes: duration,
         rpe: rpe,
         notes: notes,
         drill_performances: safeLogs
       };
 
-      console.log("Saving Session...");
       await api.post('/sessions', payload);
-      
-      // ✅ FIX: Navigate IMMEDIATELY (Don't wait for Alert)
       navigation.navigate('Main', { screen: 'Progress' });
-
-      // Show success after navigation starts
-      setTimeout(() => {
-        Alert.alert("Great Job!", "Session saved! XP Earned.");
-      }, 500);
+      setTimeout(() => { Alert.alert("Great Job!", "Session saved! XP Earned."); }, 500);
 
     } catch (error) {
       console.error("Save Error:", error);
-      Alert.alert("Error", "Could not save session. Please try again.");
+      Alert.alert("Error", "Could not save session.");
     }
   };
 
@@ -177,33 +173,23 @@ export default function SessionScreen({ route, navigation }) {
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <Text style={styles.mainTitle}>{session.title}</Text>
             <View style={styles.metaRow}>
-              <View style={styles.metaItem}>
-                <Clock size={16} color="#64748B" />
-                <Text style={styles.metaText}>{totalMins} min</Text>
-              </View>
-              <View style={styles.metaItem}>
-                <Dumbbell size={16} color="#64748B" />
-                <Text style={styles.metaText}>{session.items.length} Drills</Text>
-              </View>
+              <View style={styles.metaItem}><Clock size={16} color="#64748B" /><Text style={styles.metaText}>{totalMins} min</Text></View>
+              <View style={styles.metaItem}><Dumbbell size={16} color="#64748B" /><Text style={styles.metaText}>{session.items.length} Drills</Text></View>
             </View>
 
             <View style={styles.listContainer}>
               {session.items.map((item, idx) => {
-                const difficulties = ['Beginner', 'Intermediate', 'Advanced'];
-                const diff = difficulties[idx % 3]; 
-                const diffColors = getDifficultyColor(diff);
-                const duration = item.duration_minutes || item.targetDurationMin || 0;
-
+                const diffColors = getDifficultyColor('Intermediate');
                 return (
                   <View key={idx} style={styles.drillCard}>
                     <View style={styles.drillLeft}>
                       <Text style={styles.drillIndex}>DRILL {idx + 1}</Text>
-                      <Text style={styles.drillName}>{item.drill_name || item.name || 'Drill'}</Text>
+                      <Text style={styles.drillName}>{item.drill_name || item.name}</Text>
                     </View>
                     <View style={styles.drillRight}>
-                      <Text style={styles.drillDuration}>{duration}m</Text>
+                      <Text style={styles.drillDuration}>{item.duration_minutes || item.targetDurationMin || 0}m</Text>
                       <View style={[styles.pill, { backgroundColor: diffColors.bg, borderColor: diffColors.border }]}>
-                        <Text style={[styles.pillText, { color: diffColors.text }]}>{diff}</Text>
+                        <Text style={[styles.pillText, { color: diffColors.text }]}>Drill</Text>
                       </View>
                     </View>
                   </View>
@@ -213,34 +199,27 @@ export default function SessionScreen({ route, navigation }) {
           </ScrollView>
 
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.exitBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.exitBtnText}>Exit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.startBtn} onPress={handleBeginSession}>
-              <Text style={styles.startBtnText}>Begin Session</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.exitBtn} onPress={() => navigation.goBack()}><Text style={styles.exitBtnText}>Exit</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.startBtn} onPress={handleBeginSession}><Text style={styles.startBtnText}>Begin Session</Text></TouchableOpacity>
           </View>
         </SafeAreaView>
       </View>
     );
   }
 
-  // ==================== 2. PREP VIEW (Drill Details) ====================
+  // ==================== 2. PREP VIEW ====================
   if (viewState === 'PREP') {
     return (
       <View style={styles.container}>
         <SafeAreaView style={{flex: 1}}>
           <ScrollView contentContainerStyle={{padding: 24, paddingBottom: 100}}>
-            
-            {/* Header Row */}
             <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16}}>
                 <Text style={{fontSize: 14, color: '#64748B', fontWeight: '600'}}>Drill {currentDrillIndex + 1} of {session.items.length}</Text>
-                <View style={{backgroundColor: '#F1F5F9', px: 2, py: 1, borderRadius: 4}}>
+                <View style={{backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4}}>
                     <Text style={{fontSize: 12, fontWeight: '800', color: '#475569'}}>PREP</Text>
                 </View>
             </View>
 
-            {/* Media Placeholder (Video) */}
             <View style={styles.mediaPlaceholder}>
                 <View style={{alignItems: 'center'}}>
                     <Play size={48} color="#FFF" fill="rgba(255,255,255,0.2)" />
@@ -248,39 +227,27 @@ export default function SessionScreen({ route, navigation }) {
                 </View>
             </View>
 
-            {/* Title & Tags */}
-            <Text style={styles.prepTitle}>{currentItem.drill_name || "Drill Name"}</Text>
+            <Text style={styles.prepTitle}>{currentItem.drill_name}</Text>
             <View style={{flexDirection: 'row', gap: 8, marginBottom: 24}}>
                 <View style={[styles.tagPill, {backgroundColor: '#DCFCE7'}]}>
                     <Clock size={14} color="#15803D" />
                     <Text style={{color: '#15803D', fontWeight: 'bold', fontSize: 12, marginLeft: 4}}>{currentDuration} min</Text>
                 </View>
-                <View style={[styles.tagPill, {backgroundColor: '#F1F5F9'}]}>
-                    <Dumbbell size={14} color="#64748B" />
-                    <Text style={{color: '#64748B', fontWeight: 'bold', fontSize: 12, marginLeft: 4}}>1 Set</Text>
-                </View>
             </View>
 
-            {/* Instructions */}
             <View style={styles.instructionBlock}>
                 <Text style={styles.instructionLabel}>INSTRUCTIONS</Text>
-                <Text style={styles.instructionText}>
-                    {currentItem.description || "Focus on consistency and technique. Maintain a steady rhythm throughout the drill."}
-                </Text>
+                <Text style={styles.instructionText}>{currentItem.description || "Focus on form."}</Text>
             </View>
 
-            {/* Coach Note */}
-            <View style={styles.coachNoteBlock}>
-                <Lightbulb size={20} color="#CA8A04" style={{marginTop: 2}} />
-                <Text style={styles.coachNoteText}>
-                    <Text style={{fontWeight: 'bold'}}>Coach Note: </Text>
-                    {currentItem.notes || "Keep your eye on the ball and follow through."}
-                </Text>
-            </View>
-
+            {currentItem.notes && (
+                <View style={styles.coachNoteBlock}>
+                    <Lightbulb size={20} color="#CA8A04" style={{marginTop: 2}} />
+                    <Text style={styles.coachNoteText}><Text style={{fontWeight: 'bold'}}>Coach Note: </Text>{currentItem.notes}</Text>
+                </View>
+            )}
           </ScrollView>
 
-          {/* Fixed Footer */}
           <View style={styles.footer}>
             <TouchableOpacity style={[styles.startBtn, {width: '100%'}]} onPress={handleStartDrill}>
               <Text style={styles.startBtnText}>Start Drill</Text>
@@ -292,7 +259,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 3. COUNTDOWN VIEW ====================
+  // ==================== 3. COUNTDOWN ====================
   if (viewState === 'COUNTDOWN') {
     return (
       <View style={styles.countdownContainer}>
@@ -302,64 +269,89 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 4. ACTIVE DRILL VIEW ====================
+  // ==================== 4. ACTIVE DRILL (CLEANED UP) ====================
   if (viewState === 'ACTIVE') {
     return (
       <View style={[styles.container, { backgroundColor: '#0F172A' }]}>
         <SafeAreaView style={styles.activeContent}>
-          <Text style={{ color: '#94A3B8', fontWeight: '600' }}>
-            Drill {currentDrillIndex + 1} of {session.items.length}
-          </Text>
-          <Text style={[styles.prepTitle, { color: '#FFF', textAlign: 'center', marginTop: 10, fontSize: 28 }]}>
-            {currentItem.drill_name}
-          </Text>
+          <View style={{alignItems: 'center'}}>
+            <Text style={{ color: '#94A3B8', fontWeight: '600', marginBottom: 8 }}>
+                Drill {currentDrillIndex + 1} of {session.items.length}
+            </Text>
+            <Text style={[styles.prepTitle, { color: '#FFF', textAlign: 'center', fontSize: 24 }]}>
+                {currentItem.drill_name}
+            </Text>
+          </View>
           
+          {/* Main Timer Focus */}
           <View style={styles.timerCircle}>
             <Text style={styles.timerText}>{formatTime(timeLeft)}</Text>
             <TouchableOpacity onPress={() => setIsTimerRunning(!isTimerRunning)} style={styles.playPauseBtn}>
-              {isTimerRunning ? <Pause color="#FFF" size={24} /> : <Play color="#FFF" size={24} style={{marginLeft: 4}} />}
+              {isTimerRunning ? <Pause color="#FFF" size={32} /> : <Play color="#FFF" size={32} style={{marginLeft: 4}} />}
             </TouchableOpacity>
           </View>
 
-          {/* ✅ Check for drillScoring (library OR session target) */}
-          {drillScoring ? (
-            <View style={styles.numericFeedbackContainer}>
-              <Text style={styles.numericPrompt}>{drillScoring.prompt}</Text>
-              <TextInput
-                style={styles.numericInput}
-                keyboardType="numeric"
-                value={achievedValue}
-                onChangeText={setAchievedValue}
-                placeholder="0"
-                placeholderTextColor="#64748B"
-              />
-              <Text style={styles.targetLabel}>Target: {drillScoring.target}</Text>
-            </View>
-          ) : (
-            <View style={styles.activeInstructionBox}>
-              <Text style={{color: '#E2E8F0', fontSize: 16, textAlign: 'center'}}>
-                  {currentItem.notes || "Focus on form"}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#EF4444'}]} onPress={() => completeDrill('fail')}>
-              <ThumbsDown color="#FFF" />
-              <Text style={styles.actionBtnText}>Struggled</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#22C55E'}]} onPress={() => completeDrill('success')}>
-              <ThumbsUp color="#FFF" />
-              <Text style={styles.actionBtnText}>Nailed It</Text>
-            </TouchableOpacity>
+          {/* Just the Finish Button */}
+          <View style={{width: '100%', paddingHorizontal: 24}}>
+             <TouchableOpacity style={styles.finishDrillBtn} onPress={handleFinishDrill}>
+                <Check color="#FFF" size={24} />
+                <Text style={styles.finishDrillText}>Complete Drill</Text>
+             </TouchableOpacity>
           </View>
         </SafeAreaView>
       </View>
     );
   }
 
-  // ==================== 5. SUMMARY VIEW ====================
+  // ==================== 5. FEEDBACK VIEW (NEW) ====================
+  if (viewState === 'FEEDBACK') {
+    return (
+      <View style={[styles.container, { backgroundColor: '#F1F5F9' }]}>
+        <SafeAreaView style={{flex: 1, justifyContent: 'center', padding: 24}}>
+            <View style={styles.feedbackCard}>
+                <Text style={styles.feedbackHeader}>Drill Complete!</Text>
+                <Text style={styles.feedbackSub}>{currentItem.drill_name}</Text>
+
+                <View style={styles.divider} />
+
+                {drillScoring ? (
+                    <View style={{width: '100%', marginBottom: 24}}>
+                        <Text style={styles.numericPrompt}>{drillScoring.prompt}</Text>
+                        {drillScoring.target && (
+                            <Text style={styles.targetLabel}>Target: {drillScoring.target}</Text>
+                        )}
+                        <TextInput
+                            style={styles.numericInput}
+                            keyboardType="numeric"
+                            value={achievedValue}
+                            onChangeText={setAchievedValue}
+                            placeholder="0"
+                            placeholderTextColor="#94A3B8"
+                            autoFocus={true}
+                        />
+                    </View>
+                ) : (
+                    <Text style={[styles.numericPrompt, {marginBottom: 24}]}>How did you perform?</Text>
+                )}
+
+                <View style={styles.feedbackGrid}>
+                    <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#FEE2E2', borderColor: '#FECACA'}]} onPress={() => completeDrill('fail')}>
+                        <ThumbsDown color="#DC2626" size={28} />
+                        <Text style={[styles.feedbackBtnText, {color: '#DC2626'}]}>Struggled</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#DCFCE7', borderColor: '#BBF7D0'}]} onPress={() => completeDrill('success')}>
+                        <ThumbsUp color="#16A34A" size={28} />
+                        <Text style={[styles.feedbackBtnText, {color: '#16A34A'}]}>Nailed It</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // ==================== 6. SUMMARY VIEW ====================
   return (
     <View style={styles.container}>
       <SafeAreaView style={{flex: 1}}>
@@ -379,16 +371,12 @@ export default function SessionScreen({ route, navigation }) {
 
             <Text style={styles.label}>Notes</Text>
             <TextInput 
-              style={styles.input} 
-              placeholder="How did it feel?" 
-              multiline 
-              numberOfLines={4} 
-              value={notes}
-              onChangeText={setNotes}
+              style={styles.input} placeholder="How did it feel?" 
+              multiline numberOfLines={4} value={notes} onChangeText={setNotes}
             />
           </View>
 
-          <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession} >
+          <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession}>
             <Text style={styles.startBtnText}>Save & Finish</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -415,11 +403,7 @@ const styles = StyleSheet.create({
 
   // Drill List
   listContainer: { gap: 12 },
-  drillCard: {
-    backgroundColor: '#FFF', borderRadius: 12, padding: 16,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small
-  },
+  drillCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   drillLeft: { flex: 1, marginRight: 12 },
   drillIndex: { fontSize: 11, fontWeight: '800', color: COLORS.primary, marginBottom: 4, letterSpacing: 0.5 },
   drillName: { fontSize: 16, fontWeight: '700', color: '#1E293B', lineHeight: 22 },
@@ -428,45 +412,45 @@ const styles = StyleSheet.create({
   pill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 100, borderWidth: 1 },
   pillText: { fontSize: 10, fontWeight: '700' },
 
-  // PREP VIEW STYLES
-  mediaPlaceholder: {
-    width: '100%', aspectRatio: 16/9, backgroundColor: '#1E293B', borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 24
-  },
+  // PREP VIEW
+  mediaPlaceholder: { width: '100%', aspectRatio: 16/9, backgroundColor: '#1E293B', borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
   prepTitle: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginBottom: 12 },
   tagPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  instructionBlock: { backgroundColor: '#94A3B8', padding: 16, borderRadius: 12, marginBottom: 16 }, // Matches gray in image
+  instructionBlock: { backgroundColor: '#94A3B8', padding: 16, borderRadius: 12, marginBottom: 16 },
   instructionLabel: { fontSize: 12, fontWeight: '800', color: '#1E293B', marginBottom: 8, letterSpacing: 0.5 },
   instructionText: { fontSize: 14, color: '#1E293B', lineHeight: 20 },
   coachNoteBlock: { backgroundColor: '#E0F2FE', padding: 16, borderRadius: 12, flexDirection: 'row', gap: 12, borderLeftWidth: 4, borderLeftColor: '#0284C7' },
   coachNoteText: { flex: 1, fontSize: 14, color: '#0369A1', lineHeight: 20 },
 
-  // COUNTDOWN VIEW
+  // COUNTDOWN
   countdownContainer: { flex: 1, backgroundColor: '#15803D', alignItems: 'center', justifyContent: 'center' },
   countdownText: { fontSize: 120, fontWeight: '900', color: '#FFF' },
   getReadyText: { fontSize: 24, fontWeight: '800', color: 'rgba(255,255,255,0.8)', letterSpacing: 2, marginTop: 20 },
 
-  // ACTIVE VIEW STYLES
-  activeContent: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'space-between' },
-  timerCircle: { 
-    width: 280, height: 280, borderRadius: 140, 
-    borderWidth: 8, borderColor: '#15803D', // Green Border
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617' 
-  },
-  timerText: { fontSize: 72, fontWeight: '800', color: '#FFF', fontVariant: ['tabular-nums'] },
-  playPauseBtn: { marginTop: 16, backgroundColor: 'rgba(255,255,255,0.1)', padding: 12, borderRadius: 50 },
-  activeInstructionBox: { backgroundColor: '#1E293B', padding: 16, borderRadius: 12, width: '100%', alignItems: 'center' },
-  actionRow: { flexDirection: 'row', gap: 16, width: '100%' },
-  actionBtn: { flex: 1, padding: 20, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  actionBtnText: { color: '#FFF', fontWeight: '800', marginTop: 8, fontSize: 16 },
+  // ACTIVE VIEW
+  activeContent: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'space-between', paddingBottom: 40 },
+  timerCircle: { width: 300, height: 300, borderRadius: 150, borderWidth: 8, borderColor: '#15803D', alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617' },
+  timerText: { fontSize: 80, fontWeight: '800', color: '#FFF', fontVariant: ['tabular-nums'] },
+  playPauseBtn: { marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 60 },
+  finishDrillBtn: { backgroundColor: '#16A34A', padding: 20, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%', ...SHADOWS.medium },
+  finishDrillText: { color: '#FFF', fontSize: 18, fontWeight: '800' },
+
+  // FEEDBACK VIEW
+  feedbackCard: { backgroundColor: '#FFF', borderRadius: 24, padding: 32, alignItems: 'center', ...SHADOWS.medium },
+  feedbackHeader: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginBottom: 8 },
+  feedbackSub: { fontSize: 16, color: '#64748B', textAlign: 'center', marginBottom: 24 },
+  divider: { height: 1, width: '100%', backgroundColor: '#E2E8F0', marginBottom: 24 },
+  
+  numericPrompt: { fontSize: 16, fontWeight: '700', color: '#334155', marginBottom: 12, textAlign: 'center' },
+  targetLabel: { fontSize: 12, fontWeight: '700', color: COLORS.primary, marginBottom: 8, textTransform: 'uppercase', textAlign: 'center' },
+  numericInput: { backgroundColor: '#F8FAFC', width: '100%', height: 64, borderRadius: 16, fontSize: 32, fontWeight: '800', textAlign: 'center', color: '#0F172A', borderWidth: 1, borderColor: '#E2E8F0' },
+  
+  feedbackGrid: { flexDirection: 'row', gap: 16, width: '100%' },
+  feedbackBtn: { flex: 1, padding: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  feedbackBtnText: { fontWeight: '800', marginTop: 8, fontSize: 14 },
 
   // Footer & Common
-  footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E2E8F0',
-    padding: 16, flexDirection: 'row', gap: 12, paddingBottom: 32,
-    ...SHADOWS.medium
-  },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E2E8F0', padding: 16, flexDirection: 'row', gap: 12, paddingBottom: 32, ...SHADOWS.medium },
   exitBtn: { flex: 1, backgroundColor: '#334155', padding: 16, borderRadius: 12, alignItems: 'center' },
   exitBtnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
   startBtn: { flex: 2, backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
@@ -479,37 +463,4 @@ const styles = StyleSheet.create({
   rpeBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   rpeText: { fontWeight: '700', fontSize: 16, color: '#64748B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  numericFeedbackContainer: {
-    width: '100%',
-    alignItems: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 20,
-  },
-  numericPrompt: {
-    color: '#94A3B8',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center'
-  },
-  numericInput: {
-    backgroundColor: '#FFF',
-    width: 120,
-    height: 60,
-    borderRadius: 12,
-    fontSize: 32,
-    fontWeight: '800',
-    textAlign: 'center',
-    color: '#0F172A',
-  },
-  targetLabel: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 8,
-    textTransform: 'uppercase'
-  },
 });
