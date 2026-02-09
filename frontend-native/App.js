@@ -14,6 +14,7 @@ import AssessmentScreen from './src/screens/AssessmentScreen';
 import AthleteDetailScreen from './src/screens/AthleteDetailScreen';
 import SquadDetailScreen from './src/screens/SquadDetailScreen';
 import SessionLogDetailScreen from './src/screens/SessionLogDetailScreen';
+import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -99,6 +100,12 @@ export default function App() {
         <Stack.Screen 
           name="SessionLogDetail" 
           component={SessionLogDetailScreen} 
+        />
+
+        <Stack.Screen 
+          name="SessionSummary" 
+          component={SessionSummaryScreen} 
+          options={{ headerShown: false }} 
         />
 
       </Stack.Navigator>

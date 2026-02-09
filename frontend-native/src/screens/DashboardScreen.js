@@ -245,21 +245,32 @@ export default function DashboardScreen({ navigation }) {
                         programId: sessionItem.programId 
                     })}
                 >
-                  <View style={styles.upNextHeader}>
+                <View style={styles.upNextHeader}>
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
-                    <View style={styles.planBadge}><Text style={styles.planBadgeText}>Active Plan</Text></View>
-                  </View>
-                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
-                      <View style={{flex: 1, marginRight: 12}}>
+                    
+                    {/* ✅ SPECIAL LABEL: Check if assigned by Coach */}
+                    {sessionItem.coachName && sessionItem.coachName !== 'Self-Guided' && sessionItem.coachName !== 'System' ? (
+                        <View style={[styles.planBadge, { backgroundColor: '#7C3AED' }]}>
+                            <Text style={[styles.planBadgeText, { color: '#FFF' }]}>COACH ASSIGNED</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.planBadge}>
+                            <Text style={styles.planBadgeText}>Active Plan</Text>
+                        </View>
+                    )}
+                </View>
+
+                <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+                    <View style={{flex: 1, marginRight: 12}}>
                         <Text style={styles.upNextTitle}>{sessionItem.title}</Text>
                         <Text style={styles.upNextSubtitle}>{sessionItem.programTitle}</Text>
                         <View style={styles.metaRow}>
                             <View style={styles.metaItem}><Clock size={14} color="#64748B" /><Text style={styles.metaText}>{sessionItem.duration} min</Text></View>
                             <View style={styles.metaItem}><Dumbbell size={14} color="#64748B" /><Text style={styles.metaText}>{sessionItem.drillCount} Drills</Text></View>
                         </View>
-                      </View>
-                      <PlayCircle size={32} color={COLORS.primary} fill="#E0F2FE" style={{marginTop: 4}}/>
-                  </View>
+                    </View>
+                    <PlayCircle size={32} color={COLORS.primary} fill="#E0F2FE" style={{marginTop: 4}}/>
+                </View>
                 </TouchableOpacity>
             ))
           ) : (

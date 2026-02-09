@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
 import { Layout, Plus, Users, Dumbbell, ClipboardList, CalendarDays, TrendingUp, User as UserIcon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
@@ -10,7 +11,8 @@ import { fetchPrograms } from '../services/api';
 import DashboardScreen from '../screens/DashboardScreen';
 import TeamScreen from '../screens/TeamScreen';
 import DrillLibraryScreen from '../screens/DrillLibraryScreen';
-import ProgramsListScreen from '../screens/ProgramsListScreen';
+import ProgramsListScreen from '../screens/ProgramsListScreen'; 
+import PlansScreen from '../screens/PlansScreen'; 
 import CoachActionScreen from '../screens/CoachActionScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -21,21 +23,42 @@ export default function BottomTabNavigator({ navigation }) {
   const [role, setRole] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
 
+  // 1. Check Role
   useEffect(() => {
     const checkData = async () => {
       try {
         const storedRole = await AsyncStorage.getItem('user_role');
         const safeRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
         setRole(safeRole);
-        if (safeRole === 'PLAYER') {
-          const programs = await fetchPrograms();
-          const count = programs.filter(p => (p.status || '').toUpperCase() === 'PENDING').length;
-          setPendingCount(count);
-        }
       } catch (e) { setRole('PLAYER'); }
     };
     checkData();
   }, []);
+
+  // 2. Poll for Pending Invites (Only if Player)
+  useFocusEffect(
+    useCallback(() => {
+      if (role !== 'PLAYER') return;
+
+      const checkPending = async () => {
+        try {
+          const programs = await fetchPrograms();
+          // Count programs where status is 'PENDING'
+          const count = programs.filter(p => p.status === 'PENDING').length;
+          setPendingCount(count);
+        } catch (e) {
+          console.log("Badge fetch error", e);
+        }
+      };
+
+      // Initial check
+      checkPending();
+
+      // Optional: Poll every 10 seconds to keep it fresh
+      const interval = setInterval(checkPending, 10000);
+      return () => clearInterval(interval);
+    }, [role])
+  );
 
   if (role === null) return <ActivityIndicator size="large" style={{flex:1}} />;
 
@@ -46,7 +69,6 @@ export default function BottomTabNavigator({ navigation }) {
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: styles.tabBar,
-        // ✅ CRITICAL: This ensures all items (visible or hidden) don't mess up the flex math
         tabBarItemStyle: { height: 50 }, 
       }}
     >
@@ -60,7 +82,6 @@ export default function BottomTabNavigator({ navigation }) {
             options={{ tabBarLabel: 'Team', tabBarIcon: ({ color }) => <Users color={color} size={24} /> }} 
           />
           
-          {/* ✅ FIXED + BUTTON: Uses listeners instead of a custom button component for better layout stability */}
           <Tab.Screen 
             name="CoachAction" 
             component={CoachActionScreen} 
@@ -84,10 +105,16 @@ export default function BottomTabNavigator({ navigation }) {
         </>
       ) : (
         <>
-          {/* PLAYER TABS: Standard 4-item layout */}
-          <Tab.Screen name="Plans" component={ProgramsListScreen} 
-            options={{ tabBarLabel: 'Plans', tabBarIcon: ({ color }) => <CalendarDays color={color} size={24} /> }} 
+          <Tab.Screen name="Plans" component={PlansScreen} 
+            options={{ 
+              tabBarLabel: 'Plans', 
+              // ✅ SHOW BADGE IF PENDING > 0
+              tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
+              tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+              tabBarIcon: ({ color }) => <CalendarDays color={color} size={24} /> 
+            }} 
           />
+          
           <Tab.Screen name="CreatePlayer" component={View} 
             listeners={{ tabPress: (e) => { e.preventDefault(); navigation.navigate('ProgramBuilder'); } }}
             options={{ 
@@ -99,9 +126,11 @@ export default function BottomTabNavigator({ navigation }) {
               ),
             }} 
           />
+          
           <Tab.Screen name="Progress" component={ProgressScreen} 
             options={{ tabBarLabel: 'Progress', tabBarIcon: ({ color }) => <TrendingUp color={color} size={24} /> }} 
           />
+          
           <Tab.Screen name="Profile" component={ProfileScreen} 
             options={{ tabBarLabel: 'Profile', tabBarIcon: ({ color }) => <UserIcon color={color} size={24} /> }} 
           />
@@ -119,7 +148,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#E2E8F0', 
     height: 70, 
     paddingBottom: 12,
-    // ✅ This forces the items to distribute across the whole width
     display: 'flex',
   },
   floatingButton: { 
@@ -129,7 +157,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary, 
     justifyContent: 'center', 
     alignItems: 'center', 
-    marginTop: -30, // Lifts it up
+    marginTop: -30, 
     borderWidth: 4, 
     borderColor: '#FFF',
     shadowColor: "#000",

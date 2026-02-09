@@ -73,8 +73,6 @@ export const generateOnboardingPlans = async (userInfo, drills) => {
   `;
 
   try {
-    // Note: Updated to standard model instantiation if 'ai.models' fails, but keeping your structure if it works for your SDK version.
-    // If 'ai.models.generateContent' fails, swap to: const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: "Generate 3 starter programs.",
@@ -84,7 +82,6 @@ export const generateOnboardingPlans = async (userInfo, drills) => {
       }
     });
 
-    // ✅ FIX: Safe Text Extraction + JSON Cleaning
     const rawText = extractResponseText(response);
     const cleanedText = cleanJson(rawText);
 
@@ -92,7 +89,6 @@ export const generateOnboardingPlans = async (userInfo, drills) => {
     
     const data = JSON.parse(cleanedText);
     
-    // Add IDs and Metadata locally
     return data.plans.map((p) => ({
       ...p,
       id: Math.random().toString(36).substr(2, 9),
@@ -136,11 +132,13 @@ export const generateAIProgram = async (
 
   // --- Analyze History ---
   const historyAnalysis = history.reduce((acc, log) => {
-    if (log.drillPerformance) {
-        log.drillPerformance.forEach(perf => {
-            if (!acc[perf.drillId]) acc[perf.drillId] = { success: 0, fail: 0 };
-            if (perf.outcome === 'success') acc[perf.drillId].success++;
-            else acc[perf.drillId].fail++;
+    if (log.drill_performances) {
+        log.drill_performances.forEach(perf => {
+            const id = perf.drill_id; 
+            if (!acc[id]) acc[id] = { success: 0, fail: 0 };
+            
+            if (perf.outcome === 'success') acc[id].success++;
+            else acc[id].fail++;
         });
     }
     return acc;
@@ -213,7 +211,6 @@ export const generateAIProgram = async (
       }
     });
 
-    // ✅ FIX: Safe Text Extraction + JSON Cleaning
     const rawText = extractResponseText(response);
     const cleanedText = cleanJson(rawText);
 
@@ -244,13 +241,15 @@ export const generateAIProgram = async (
 };
 
 /**
- * 3. Generate Squad Session (For "EditSessionModal.tsx")
- * Creates a single session list of drills based on constraints.
+ * 3. Generate Squad Program (Updated to Multi-Session)
+ * Creates a complete multi-week program tailored to squad constraints.
  */
-export const generateSquadSession = async (
+export const generateSquadProgram = async (
   prompt,
   drills,
-  constraints // { players: number, courts: number }
+  coachId,
+  constraints, // { players: number, courts: number }
+  config = { weeks: 4 } // Default to 4-week program
 ) => {
   if (!API_KEY) {
     console.error("API Key is missing");
@@ -261,35 +260,112 @@ export const generateSquadSession = async (
   const drillContext = getDrillKnowledgeBase(drills);
 
   const systemInstruction = `
-    You are an expert tennis coach planning a group squad session.
-    Constraints: ${constraints.players} players, ${constraints.courts} courts.
+    You are an expert tennis coach planning a ${config.weeks}-week SQUAD training program.
+    
+    Constraints: ${constraints.players} players on ${constraints.courts} court(s).
     Drill Library: ${drillContext}
     
-    Select drills that work well for this specific group size and court count to minimize standing around.
-    Return JSON with an "items" array.
+    CRITICAL INSTRUCTIONS:
+    1. Select drills that maximize participation for ${constraints.players} players. 
+    2. If players per court > 4, you MUST prioritize rotation drills, "King of Court", or line feeding drills. Avoid static 1-on-1 drills where players stand around.
+    3. Ensure the program has ${config.weeks} distinct sessions (1 per week).
+    4. Each session must have 1 warmup and 3 main drills suited for the group size.
+    
+    Return JSON format:
+    {
+      "title": "Squad Program Title",
+      "description": "Brief description of the squad focus and how it handles the group size.",
+      "sessions": [
+        {
+          "title": "Session 1 Title",
+          "items": [
+             { "drillId": "d1", "targetDurationMin": 15, "notes": "Specific instructions for running this with ${constraints.players} players (e.g. 'Use 2 lines', 'Rotate every 3 points')." }
+          ]
+        }
+      ]
+    }
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Switched to 2.0-flash for consistency
-      contents: `Create a session focusing on: ${prompt}`,
+      model: 'gemini-2.5-flash', 
+      contents: `Create a squad program focusing on: ${prompt}`,
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
       }
     });
 
-    // ✅ FIX: Safe Text Extraction + JSON Cleaning
     const rawText = extractResponseText(response);
     const cleanedText = cleanJson(rawText);
     
     if (!cleanedText) return null;
 
     const data = JSON.parse(cleanedText);
-    return data.items;
+    
+    // Return full program object structure
+    return {
+      ...data,
+      id: Math.random().toString(36).substr(2, 9),
+      assignedBy: 'AI_ASSISTANT',
+      completed: false,
+      status: 'ACCEPTED',
+      createdAt: new Date().toISOString(),
+      config: config,
+      sessions: data.sessions.map(s => ({
+        ...s,
+        id: Math.random().toString(36).substr(2, 9),
+        completed: false
+      }))
+    };
 
   } catch (error) {
-    console.error("Error generating squad session:", error);
+    console.error("Error generating squad program:", error);
     return null;
   }
 };
+
+export const generateSquadSession = async (prompt, drills, constraints) => {
+  if (!API_KEY) return null;
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  const drillContext = getDrillKnowledgeBase(drills);
+
+  const systemInstruction = `
+    Adapt a single session. 
+    Constraints: ${constraints.players} players, ${constraints.courts} courts.
+    Drill Library: ${drillContext}
+    Return JSON: { "items": [{ "drillId": "...", "notes": "..." }] }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: `Adapt based on: ${prompt}`,
+      config: { systemInstruction, responseMimeType: "application/json" }
+    });
+    
+    const data = JSON.parse(cleanJson(extractResponseText(response)));
+    return data.items;
+  } catch (error) {
+    return null;
+  }
+};
+
+const hydrateProgram = (data, userId) => ({
+  ...data,
+  id: `prog-${Date.now()}`,
+  assignedBy: 'AI_ASSISTANT',
+  assignedTo: userId,
+  completed: false,
+  status: 'ACCEPTED',
+  createdAt: new Date().toISOString(),
+  sessions: (data.sessions || []).map((s, i) => ({
+    ...s,
+    id: `sess-${Date.now()}-${i}`,
+    completed: false,
+    items: (s.items || []).map((item, k) => ({
+        ...item,
+        uniqueId: `item-${Date.now()}-${k}`
+    }))
+  }))
+});

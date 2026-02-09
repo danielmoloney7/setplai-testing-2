@@ -58,17 +58,27 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
   };
 
   const handleCreateSquad = async () => {
-    if (!newSquadName.trim()) return;
+    // 1. Validation Feedback
+    if (!newSquadName.trim()) {
+        Alert.alert("Missing Name", "Please enter a name for your new squad.");
+        return;
+    }
+    
+    // 2. Debugging Log
+    console.log("Creating Squad:", newSquadName, selectedMembers);
+
     try {
         await createSquad(newSquadName, "General", selectedMembers);
         setModalVisible(false);
         setNewSquadName('');
         setSelectedMembers([]);
         loadData();
+        Alert.alert("Success", "Squad created!");
     } catch (e) {
-        Alert.alert("Error", "Could not create squad.");
+        console.error("Create Squad Failed:", e);
+        Alert.alert("Error", "Could not create squad. Check connection.");
     }
-  };
+};
 
   const renderAthleteItem = ({ item }) => (
     <TouchableOpacity 

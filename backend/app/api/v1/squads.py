@@ -12,7 +12,7 @@ router = APIRouter()
 class SquadCreate(BaseModel):
     name: str
     level: Optional[str] = "Mixed"
-    initial_members: List[str] = []  # ✅ New field for selecting athletes
+    initial_members: List[str] = []
 
 class AddMemberRequest(BaseModel):
     player_id: str
@@ -25,7 +25,8 @@ class SquadResponse(BaseModel):
 
 # --- ENDPOINTS ---
 
-@router.get("/", response_model=List[SquadResponse])
+# ✅ FIX: Changed "/" to "" to prevent 307 Redirects
+@router.get("", response_model=List[SquadResponse])
 def get_my_squads(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "COACH":
         raise HTTPException(403, "Only coaches can view squads.")
@@ -37,7 +38,8 @@ def get_my_squads(db: Session = Depends(get_db), current_user: User = Depends(ge
         for s in squads
     ]
 
-@router.post("/")
+# ✅ FIX: Changed "/" to ""
+@router.post("")
 def create_squad(squad_data: SquadCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "COACH":
         raise HTTPException(403, "Only coaches can create squads.")

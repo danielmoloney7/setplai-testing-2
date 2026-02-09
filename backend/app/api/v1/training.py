@@ -150,6 +150,7 @@ def get_programs(
     current_user: User = Depends(get_current_user)
 ):
     try:
+        # Fetch logic
         if "COACH" in current_user.role.upper():
             programs = db.query(Program).filter(Program.creator_id == current_user.id).all()
         else:
@@ -162,6 +163,7 @@ def get_programs(
         
         results = []
         for p in programs:
+            # Determine Status (Overall)
             status = "PENDING"
             if "COACH" in current_user.role.upper():
                 status = "ACTIVE"
@@ -173,8 +175,16 @@ def get_programs(
                 if assignment:
                     status = assignment.status
 
+            # ✅ Fetch Relations With Status Details
             assignments = db.query(ProgramAssignment).filter(ProgramAssignment.program_id == p.id).all()
-            assigned_ids = [a.player_id for a in assignments]
+            assignments_data = []
+            for a in assignments:
+                player = db.query(User).filter(User.id == a.player_id).first()
+                assignments_data.append({
+                    "id": a.player_id,
+                    "name": player.name if player else "Unknown",
+                    "status": a.status 
+                })
 
             creator_name = "System"
             try:
@@ -192,7 +202,7 @@ def get_programs(
                 "coach_name": creator_name,
                 "status": status,
                 "created_at": created_at_val,
-                "assigned_to": assigned_ids,
+                "assigned_to": assignments_data, # ✅ Now returns Objects, not just IDs
                 "schedule": [
                     {
                         "day_order": s.day_order,
@@ -468,3 +478,25 @@ def create_drill(
     db.commit()
     db.refresh(new_drill)
     return new_drill
+
+@router.get("/sessions")
+def get_session_logs(
+    user_id: Optional[str] = None, # ✅ Allow filtering by specific user ID
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    target_id = current_user.id
+    
+    # If Coach requests a specific user's logs, allow it
+    if user_id and "COACH" in current_user.role.upper():
+        target_id = user_id
+    
+    logs = (
+        db.query(SessionLog)
+        .filter(SessionLog.user_id == target_id)
+        .options(joinedload(SessionLog.drill_performances))
+        .order_by(SessionLog.date.desc())
+        .all()
+    )
+    
+    return logs

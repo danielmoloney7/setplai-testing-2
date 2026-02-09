@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Animated, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb, Check } from 'lucide-react-native';
+import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb, Check, Wand2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import api from '../services/api';
 import { ASSESSMENT_DRILLS } from '../constants/data';
+import EditSessionModal from '../components/EditSessionModal';
 
 // --- HELPER: Format Time ---
 const formatTime = (seconds) => {
@@ -24,8 +25,12 @@ const getDifficultyColor = (level) => {
 };
 
 export default function SessionScreen({ route, navigation }) {
-  const { session, programId } = route.params || {};
+  const { session: initialSession, programId } = route.params || {};
   
+  // ✅ FIX 1: State must be inside the component
+  const [currentSession, setCurrentSession] = useState(initialSession);
+  const [showAdaptModal, setShowAdaptModal] = useState(false);
+
   // States: 'OVERVIEW' -> 'PREP' -> 'COUNTDOWN' -> 'ACTIVE' -> 'FEEDBACK' -> 'SUMMARY'
   const [viewState, setViewState] = useState('OVERVIEW');
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
@@ -43,8 +48,8 @@ export default function SessionScreen({ route, navigation }) {
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [achievedValue, setAchievedValue] = useState('');
 
-  // 1. Identify current item
-  const currentItem = session?.items ? session.items[currentDrillIndex] : null;
+  // 1. Identify current item (Using currentSession state)
+  const currentItem = currentSession?.items ? currentSession.items[currentDrillIndex] : null;
 
   // 2. Look up global definition
   const drill = currentItem 
@@ -99,7 +104,7 @@ export default function SessionScreen({ route, navigation }) {
 
   const handleFinishDrill = () => {
     setIsTimerRunning(false);
-    setViewState('FEEDBACK'); // ✅ Move to Feedback instead of staying on Active
+    setViewState('FEEDBACK'); 
   };
 
   const completeDrill = (outcome) => {
@@ -115,7 +120,7 @@ export default function SessionScreen({ route, navigation }) {
     
     setDrillLogs(prev => [...prev, newLog]);
 
-    if (currentDrillIndex < session.items.length - 1) {
+    if (currentDrillIndex < currentSession.items.length - 1) {
       setCurrentDrillIndex(prev => prev + 1);
       setAchievedValue(''); 
       setViewState('PREP');
@@ -137,7 +142,7 @@ export default function SessionScreen({ route, navigation }) {
 
       const payload = {
         program_id: programId,
-        session_id: session.day_order || 1,
+        session_id: currentSession.day_order || 1,
         duration_minutes: duration,
         rpe: rpe,
         notes: notes,
@@ -145,8 +150,15 @@ export default function SessionScreen({ route, navigation }) {
       };
 
       await api.post('/sessions', payload);
+      
+      // ✅ AI Feedback Alert
+      let msg = "Session saved!";
+      if (rpe > 8) msg = "Great intensity! Prioritize recovery.";
+      else if (drillLogs.some(l => l.outcome === 'fail')) msg = "Good effort. Review missed drills.";
+      else msg = "Clean sweep! Ready for level up.";
+
+      setTimeout(() => { Alert.alert("Session Complete", msg); }, 500);
       navigation.navigate('Main', { screen: 'Progress' });
-      setTimeout(() => { Alert.alert("Great Job!", "Session saved! XP Earned."); }, 500);
 
     } catch (error) {
       console.error("Save Error:", error);
@@ -154,11 +166,11 @@ export default function SessionScreen({ route, navigation }) {
     }
   };
 
-  if (!session) return <View style={styles.center}><Text>No Session Data</Text></View>;
+  if (!currentSession) return <View style={styles.center}><Text>No Session Data</Text></View>;
 
   // ==================== 1. OVERVIEW VIEW ====================
   if (viewState === 'OVERVIEW') {
-    const totalMins = session.items.reduce((acc, i) => acc + (i.duration_minutes || i.targetDurationMin || 0), 0);
+    const totalMins = currentSession.items.reduce((acc, i) => acc + (i.duration_minutes || i.targetDurationMin || 0), 0);
 
     return (
       <View style={styles.container}>
@@ -166,19 +178,24 @@ export default function SessionScreen({ route, navigation }) {
           <View style={styles.header}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
               <ChevronLeft color="#334155" size={24} />
-              <Text style={styles.backText}>Session Overview</Text>
+              <Text style={styles.backText}>Overview</Text>
+            </TouchableOpacity>
+            
+            {/* ✅ FIX 2: Add Adapt Button */}
+            <TouchableOpacity onPress={() => setShowAdaptModal(true)} style={styles.iconBtn}>
+               <Wand2 size={24} color={COLORS.primary} />
             </TouchableOpacity>
           </View>
 
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Text style={styles.mainTitle}>{session.title}</Text>
+            <Text style={styles.mainTitle}>{currentSession.title}</Text>
             <View style={styles.metaRow}>
               <View style={styles.metaItem}><Clock size={16} color="#64748B" /><Text style={styles.metaText}>{totalMins} min</Text></View>
-              <View style={styles.metaItem}><Dumbbell size={16} color="#64748B" /><Text style={styles.metaText}>{session.items.length} Drills</Text></View>
+              <View style={styles.metaItem}><Dumbbell size={16} color="#64748B" /><Text style={styles.metaText}>{currentSession.items.length} Drills</Text></View>
             </View>
 
             <View style={styles.listContainer}>
-              {session.items.map((item, idx) => {
+              {currentSession.items.map((item, idx) => {
                 const diffColors = getDifficultyColor('Intermediate');
                 return (
                   <View key={idx} style={styles.drillCard}>
@@ -202,6 +219,17 @@ export default function SessionScreen({ route, navigation }) {
             <TouchableOpacity style={styles.exitBtn} onPress={() => navigation.goBack()}><Text style={styles.exitBtnText}>Exit</Text></TouchableOpacity>
             <TouchableOpacity style={styles.startBtn} onPress={handleBeginSession}><Text style={styles.startBtnText}>Begin Session</Text></TouchableOpacity>
           </View>
+
+          {/* ✅ FIX 3: Render Modal */}
+          <EditSessionModal 
+            visible={showAdaptModal}
+            onClose={() => setShowAdaptModal(false)}
+            session={currentSession}
+            onSave={(updatedSession) => {
+                setCurrentSession(updatedSession);
+                setShowAdaptModal(false);
+            }}
+          />
         </SafeAreaView>
       </View>
     );
@@ -214,7 +242,7 @@ export default function SessionScreen({ route, navigation }) {
         <SafeAreaView style={{flex: 1}}>
           <ScrollView contentContainerStyle={{padding: 24, paddingBottom: 100}}>
             <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16}}>
-                <Text style={{fontSize: 14, color: '#64748B', fontWeight: '600'}}>Drill {currentDrillIndex + 1} of {session.items.length}</Text>
+                <Text style={{fontSize: 14, color: '#64748B', fontWeight: '600'}}>Drill {currentDrillIndex + 1} of {currentSession.items.length}</Text>
                 <View style={{backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4}}>
                     <Text style={{fontSize: 12, fontWeight: '800', color: '#475569'}}>PREP</Text>
                 </View>
@@ -269,21 +297,20 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 4. ACTIVE DRILL (CLEANED UP) ====================
+  // ==================== 4. ACTIVE DRILL ====================
   if (viewState === 'ACTIVE') {
     return (
       <View style={[styles.container, { backgroundColor: '#0F172A' }]}>
         <SafeAreaView style={styles.activeContent}>
           <View style={{alignItems: 'center'}}>
             <Text style={{ color: '#94A3B8', fontWeight: '600', marginBottom: 8 }}>
-                Drill {currentDrillIndex + 1} of {session.items.length}
+                Drill {currentDrillIndex + 1} of {currentSession.items.length}
             </Text>
             <Text style={[styles.prepTitle, { color: '#FFF', textAlign: 'center', fontSize: 24 }]}>
                 {currentItem.drill_name}
             </Text>
           </View>
           
-          {/* Main Timer Focus */}
           <View style={styles.timerCircle}>
             <Text style={styles.timerText}>{formatTime(timeLeft)}</Text>
             <TouchableOpacity onPress={() => setIsTimerRunning(!isTimerRunning)} style={styles.playPauseBtn}>
@@ -291,7 +318,6 @@ export default function SessionScreen({ route, navigation }) {
             </TouchableOpacity>
           </View>
 
-          {/* Just the Finish Button */}
           <View style={{width: '100%', paddingHorizontal: 24}}>
              <TouchableOpacity style={styles.finishDrillBtn} onPress={handleFinishDrill}>
                 <Check color="#FFF" size={24} />
@@ -303,7 +329,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 5. FEEDBACK VIEW (NEW) ====================
+  // ==================== 5. FEEDBACK VIEW ====================
   if (viewState === 'FEEDBACK') {
     return (
       <View style={[styles.container, { backgroundColor: '#F1F5F9' }]}>
@@ -389,9 +415,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   
   // Header
-  header: { paddingHorizontal: 24, paddingVertical: 16 },
+  header: { paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   backText: { fontSize: 16, fontWeight: '600', color: '#334155' },
+  iconBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
 
   // Content
   scrollContent: { paddingHorizontal: 24, paddingBottom: 100 },

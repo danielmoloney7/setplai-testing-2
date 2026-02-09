@@ -61,49 +61,64 @@ export default function ProgramsListScreen({ navigation }) {
       }
   };
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity 
-        style={styles.card}
-        onPress={() => navigation.navigate('ProgramDetail', { program: item })}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.iconContainer}><Calendar size={24} color={COLORS.primary} /></View>
-        <View style={{flex: 1}}>
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Text style={styles.cardSub}>
-                {role === 'COACH' ? `${item.assigned_to?.length || 0} Assignees` : (item.coach_name || 'Coach')}
-            </Text>
-        </View>
-        
-        {/* Status Badge */}
-        <View style={[styles.badge, item.status === 'ACTIVE' ? styles.activeBadge : (item.status === 'PENDING' ? styles.pendingBadge : styles.declinedBadge)]}>
-            <Text style={[styles.badgeText, item.status === 'ACTIVE' ? styles.activeText : (item.status === 'PENDING' ? styles.pendingText : styles.declinedText)]}>
-                {item.status}
-            </Text>
-        </View>
-      </View>
+  const renderItem = ({ item }) => {
+    // ✅ Calculate Pending Count
+    const assignedList = item.assigned_to || [];
+    const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
+    const activeCount = assignedList.filter(a => a.status === 'ACTIVE').length;
 
-      {/* ✅ Action Buttons (Only for Players with PENDING status) */}
-      {role === 'PLAYER' && item.status === 'PENDING' && (
-          <View style={styles.actionsRow}>
-              <TouchableOpacity 
-                  style={[styles.actionBtn, styles.declineBtn]} 
-                  onPress={() => handleStatusChange(item.id, 'DECLINED')}
-              >
-                  <XCircle size={16} color="#B91C1C" />
-                  <Text style={styles.declineText}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                  style={[styles.actionBtn, styles.acceptBtn]} 
-                  onPress={() => handleStatusChange(item.id, 'ACTIVE')}
-              >
-                  <CheckCircle size={16} color="#FFF" />
-                  <Text style={styles.acceptText}>Accept</Text>
-              </TouchableOpacity>
+    return (
+      <TouchableOpacity 
+          style={styles.card}
+          onPress={() => navigation.navigate('ProgramDetail', { program: item })}
+      >
+        <View style={styles.cardHeader}>
+          <View style={styles.iconContainer}><Calendar size={24} color={COLORS.primary} /></View>
+          <View style={{flex: 1}}>
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              
+              {/* ✅ New Status Logic for Coach */}
+              <Text style={styles.cardSub}>
+                  {role === 'COACH' ? (
+                      pendingCount > 0 
+                      ? <Text style={{color: '#EA580C', fontWeight: 'bold'}}>{pendingCount} Pending Invite(s)</Text> 
+                      : `${activeCount} Active Athletes`
+                  ) : (
+                      item.coach_name || 'Coach'
+                  )}
+              </Text>
           </View>
-      )}
-    </TouchableOpacity>
-  );
+          
+          {/* Status Badge */}
+          <View style={[styles.badge, item.status === 'ACTIVE' ? styles.activeBadge : (item.status === 'PENDING' ? styles.pendingBadge : styles.declinedBadge)]}>
+              <Text style={[styles.badgeText, item.status === 'ACTIVE' ? styles.activeText : (item.status === 'PENDING' ? styles.pendingText : styles.declinedText)]}>
+                  {item.status}
+              </Text>
+          </View>
+        </View>
+
+        {/* Action Buttons (Player Only) */}
+        {role === 'PLAYER' && item.status === 'PENDING' && (
+            <View style={styles.actionsRow}>
+                <TouchableOpacity 
+                    style={[styles.actionBtn, styles.declineBtn]} 
+                    onPress={() => handleStatusChange(item.id, 'DECLINED')}
+                >
+                    <XCircle size={16} color="#B91C1C" />
+                    <Text style={styles.declineText}>Decline</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={[styles.actionBtn, styles.acceptBtn]} 
+                    onPress={() => handleStatusChange(item.id, 'ACTIVE')}
+                >
+                    <CheckCircle size={16} color="#FFF" />
+                    <Text style={styles.acceptText}>Accept</Text>
+                </TouchableOpacity>
+            </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
