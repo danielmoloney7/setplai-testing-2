@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, Integer, DateTime
+from sqlalchemy import Column, String, ForeignKey, Integer, DateTime, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, backref
 from app.core.database import Base
@@ -27,6 +27,12 @@ class User(Base):
     owned_squads = relationship("Squad", back_populates="coach")
     squad_memberships = relationship("SquadMember", back_populates="player")
 
+    # ✅ NEW: Notifications (Fixes the crash)
+    notifications = relationship("Notification", back_populates="user")
+
+    # ✅ NEW: Match Diary (For the new feature)
+    matches = relationship("MatchEntry", backref="user")
+
 class Squad(Base):
     __tablename__ = "squads"
 
@@ -49,3 +55,17 @@ class SquadMember(Base):
 
     squad = relationship("Squad", back_populates="members")
     player = relationship("User", back_populates="squad_memberships")
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, default=generate_id)
+    user_id = Column(String, ForeignKey("users.id"))
+    title = Column(String(255))
+    message = Column(String(500))
+    type = Column(String(50)) # 'PROGRAM_INVITE', 'SQUAD_INVITE', 'MATCH_LOG'
+    reference_id = Column(String(255), nullable=True) 
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="notifications")

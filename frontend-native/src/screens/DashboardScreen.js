@@ -6,7 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList, User } from 'lucide-react-native';
+import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList, User, Trophy, PenTool } from 'lucide-react-native';
 
 import { fetchPrograms, fetchSessionLogs, fetchSquads, fetchCoachActivity } from '../services/api'; 
 import { COLORS, SHADOWS } from '../constants/theme';
@@ -101,7 +101,6 @@ export default function DashboardScreen({ navigation }) {
               const nextDayNum = nextDrill.day_order;
               const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
               
-              // ✅ FALLBACK MAPPING: Support duration_minutes (Backend) and targetDurationMin (Web/Gemini)
               const totalMins = sessionDrills.reduce((sum, d) => 
                   sum + (parseInt(d.duration_minutes || d.targetDurationMin || d.duration || 0)), 0
               );
@@ -109,7 +108,6 @@ export default function DashboardScreen({ navigation }) {
               upcoming.push({
                   uniqueId: `${program.id}_day_${nextDayNum}`,
                   title: `Day ${nextDayNum} Training`, 
-                  // ✅ FALLBACK: Support coach_name (Backend) and assignedBy (Web types)
                   programTitle: program.title || "Untitled Program",
                   coachName: program.coach_name || "Self-Guided",
                   duration: totalMins > 0 ? totalMins : 15,
@@ -200,6 +198,30 @@ export default function DashboardScreen({ navigation }) {
   // --- PLAYER VIEW ---
   const renderPlayerView = () => (
     <View style={styles.playerContainer}>
+        {/* Tools Section */}
+        <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+            <Text style={styles.sectionTitle}>Tools</Text>
+            <View style={styles.grid}>
+                {/* Match Diary Tool */}
+                <TouchableOpacity 
+                    style={styles.actionCard} 
+                    onPress={() => navigation.navigate('MatchDiary')}
+                >
+                    <Trophy size={28} color="#D97706" />
+                    <Text style={styles.actionText}>Match Diary</Text>
+                </TouchableOpacity>
+
+                {/* ✅ NEW: Create Program Shortcut */}
+                <TouchableOpacity 
+                    style={styles.actionCard} 
+                    onPress={() => navigation.navigate('ProgramBuilder', { squadMode: false })}
+                >
+                    <PenTool size={28} color={COLORS.primary} />
+                    <Text style={styles.actionText}>Create Plan</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+
         <TouchableOpacity 
             style={[styles.inviteBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD' }]}
             onPress={() => navigation.navigate('Assessment')}
@@ -247,8 +269,6 @@ export default function DashboardScreen({ navigation }) {
                 >
                 <View style={styles.upNextHeader}>
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
-                    
-                    {/* ✅ SPECIAL LABEL: Check if assigned by Coach */}
                     {sessionItem.coachName && sessionItem.coachName !== 'Self-Guided' && sessionItem.coachName !== 'System' ? (
                         <View style={[styles.planBadge, { backgroundColor: '#7C3AED' }]}>
                             <Text style={[styles.planBadgeText, { color: '#FFF' }]}>COACH ASSIGNED</Text>
@@ -279,7 +299,8 @@ export default function DashboardScreen({ navigation }) {
             </View>
           )}
         </View>
-        
+
+        {/* ✅ ADDED: Quick Start Section Restored */}
         <Text style={styles.sectionHeader}>Quick Start</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll} contentContainerStyle={{paddingHorizontal: 24}}>
           <TouchableOpacity style={styles.quickCard}>
@@ -315,7 +336,7 @@ export default function DashboardScreen({ navigation }) {
                       <Text style={styles.avatarText}>{getInitials(user.name)}</Text>
                   </TouchableOpacity>
               ) : (
-                  <TouchableOpacity style={styles.iconBtn}>
+                  <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Notifications')}>
                       <Bell color="#FFF" size={20} />
                       {pendingCount > 0 && <View style={styles.badgeDot} />}
                   </TouchableOpacity>
@@ -380,7 +401,7 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: 'row', gap: 16 },
   actionCard: { flex: 1, backgroundColor: '#FFF', padding: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.card },
-  actionText: { fontWeight: 'bold', fontSize: 16, color: '#334155' },
+  actionText: { fontWeight: 'bold', fontSize: 14, color: '#334155' },
   
   horizontalScroll: { marginBottom: 24, marginHorizontal: 0 },
   quickCard: { backgroundColor: '#FFF', width: 160, padding: 16, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
