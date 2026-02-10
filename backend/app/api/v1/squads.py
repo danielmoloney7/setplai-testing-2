@@ -2,9 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
+from sqlalchemy import func, desc
+from datetime import datetime
+
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User, Squad, SquadMember
+from app.models.training import SquadAttendance, SessionLog, DrillPerformance, Program
 
 router = APIRouter()
 
@@ -22,6 +26,18 @@ class SquadResponse(BaseModel):
     name: str
     level: Optional[str]
     member_count: int
+
+class AttendanceRequest(BaseModel):
+    player_ids: List[str]
+    date: Optional[datetime] = None
+
+class LeaderboardEntry(BaseModel):
+    player_id: str
+    name: str
+    avatar: Optional[str]
+    attendance_count: int
+    sessions_completed: int
+    drill_score: int
 
 # --- ENDPOINTS ---
 
@@ -87,3 +103,80 @@ def remove_member(squad_id: str, player_id: str, db: Session = Depends(get_db)):
         db.delete(member)
         db.commit()
     return {"status": "removed"}
+
+@router.post("/{squad_id}/attendance")
+def mark_attendance(
+    squad_id: str, 
+    data: AttendanceRequest, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can mark attendance.")
+    
+    date_val = data.date or datetime.utcnow()
+    
+    count = 0
+    for pid in data.player_ids:
+        # Check if already marked for this day to prevent dupes (simplistic check)
+        # In production, you might check date range (start of day to end of day)
+        existing = db.query(SquadAttendance).filter(
+            SquadAttendance.squad_id == squad_id,
+            SquadAttendance.player_id == pid,
+            func.date(SquadAttendance.date) == date_val.date()
+        ).first()
+
+        if not existing:
+            rec = SquadAttendance(squad_id=squad_id, player_id=pid, date=date_val)
+            db.add(rec)
+            count += 1
+            
+    db.commit()
+    return {"status": "success", "marked": count}
+
+# ✅ NEW: Get Squad Leaderboard
+@router.get("/{squad_id}/leaderboard", response_model=List[LeaderboardEntry])
+def get_squad_leaderboard(squad_id: str, db: Session = Depends(get_db)):
+    # 1. Get all members
+    members = db.query(SquadMember).filter(SquadMember.squad_id == squad_id).all()
+    if not members: return []
+    
+    stats = []
+    
+    for m in members:
+        player = m.player
+        if not player: continue
+
+        # A. Attendance Count
+        attendance_count = db.query(SquadAttendance).filter(
+            SquadAttendance.squad_id == squad_id,
+            SquadAttendance.player_id == player.id
+        ).count()
+
+        # B. Sessions Completed (Only those assigned to this squad implicitly or explicitly)
+        # We look for logs where the program is associated with this squad or general player logs
+        # For simplicity, we count ALL sessions completed by this player as "Dedication"
+        sessions_completed = db.query(SessionLog).filter(
+            SessionLog.player_id == player.id
+        ).count()
+
+        # C. Drill Score (Sum of achieved values)
+        # Calculate total reps/score from all drill performances
+        drill_score = db.query(func.sum(DrillPerformance.achieved_value))\
+            .join(SessionLog, DrillPerformance.session_log_id == SessionLog.id)\
+            .filter(SessionLog.player_id == player.id)\
+            .scalar() or 0
+
+        stats.append({
+            "player_id": player.id,
+            "name": player.name,
+            "avatar": None, # Add avatar field to User model if you have it
+            "attendance_count": attendance_count,
+            "sessions_completed": sessions_completed,
+            "drill_score": drill_score
+        })
+    
+    # Sort by Sessions Completed by default
+    stats.sort(key=lambda x: x['sessions_completed'], reverse=True)
+    
+    return stats

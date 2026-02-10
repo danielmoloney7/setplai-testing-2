@@ -36,6 +36,8 @@ class ProgramCreateSchema(BaseModel):
     status: str = "PENDING"
     assigned_to: List[str] = [] 
     sessions: List[SessionSchema]
+    program_type: str = "PLAYER_PLAN" # 'PLAYER_PLAN' | 'SQUAD_SESSION'
+    squad_id: Optional[str] = None
 
 class ProgramStatusUpdate(BaseModel):
     status: str 
@@ -175,7 +177,7 @@ def get_programs(
                 if assignment:
                     status = assignment.status
 
-            # ✅ Fetch Relations With Status Details
+            # Fetch Relations With Status Details
             assignments = db.query(ProgramAssignment).filter(ProgramAssignment.program_id == p.id).all()
             assignments_data = []
             for a in assignments:
@@ -202,7 +204,10 @@ def get_programs(
                 "coach_name": creator_name,
                 "status": status,
                 "created_at": created_at_val,
-                "assigned_to": assignments_data, # ✅ Now returns Objects, not just IDs
+                # ✅ NEW: Explicitly return these fields
+                "program_type": getattr(p, "program_type", "PLAYER_PLAN"), 
+                "squad_id": getattr(p, "squad_id", None),
+                "assigned_to": assignments_data,
                 "schedule": [
                     {
                         "day_order": s.day_order,
@@ -218,7 +223,6 @@ def get_programs(
         return results
     except Exception as e:
         print(f"Error fetching programs: {e}")
-        raise HTTPException(500, f"Failed to fetch programs: {str(e)}")
 
 @router.post("/programs")
 def create_program(
@@ -227,16 +231,23 @@ def create_program(
     current_user: User = Depends(get_current_user)
 ):
     try:
+        print(f"📝 CREATING PROGRAM: {program_in.title} (Type: {program_in.program_type})")
+
+        # 1. Create the Program Record
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
             creator_id=current_user.id,
-            created_at=datetime.utcnow() 
+            created_at=datetime.utcnow(),
+            # ✅ Ensure these fields are saved
+            program_type=program_in.program_type, 
+            squad_id=program_in.squad_id
         )
         db.add(new_program)
         db.commit()
         db.refresh(new_program)
 
+        # 2. Add Sessions & Drills
         for sess in program_in.sessions:
             for drill in sess.drills: 
                 db_session = ProgramSession(
@@ -251,39 +262,46 @@ def create_program(
                 )
                 db.add(db_session)
 
-        raw_targets = program_in.assigned_to
-        final_player_ids = set()
+        # 3. Handle Assignments
+        # ✅ CRITICAL FIX: Only create assignments if it is a PLAYER_PLAN.
+        # SQUAD_SESSIONs are owned by the coach and do NOT generate invites.
+        if program_in.program_type == "PLAYER_PLAN":
+            print("   -> Generating Player Assignments...")
+            raw_targets = program_in.assigned_to
+            final_player_ids = set()
 
-        if not raw_targets or "SELF" in raw_targets:
-            final_player_ids.add(current_user.id)
+            if not raw_targets or "SELF" in raw_targets:
+                final_player_ids.add(current_user.id)
 
-        for target_id in raw_targets:
-            if target_id == "SELF": 
-                continue
-            
-            squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
-            
-            if squad_members:
-                for m in squad_members:
-                    final_player_ids.add(m.player_id)
-            else:
-                final_player_ids.add(target_id)
+            for target_id in raw_targets:
+                if target_id == "SELF": continue
+                
+                # Check if target is a squad -> Expand to members
+                squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
+                if squad_members:
+                    for m in squad_members:
+                        final_player_ids.add(m.player_id)
+                else:
+                    final_player_ids.add(target_id)
 
-        for player_id in final_player_ids:
-            if not player_id: continue
+            for player_id in final_player_ids:
+                if not player_id: continue
+                
+                # Auto-accept if assigning to self
+                final_status = "PENDING"
+                if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
+                    final_status = "ACTIVE"
 
-            final_status = "PENDING"
-            if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
-                final_status = "ACTIVE"
-
-            assignment = ProgramAssignment(
-                program_id=new_program.id,
-                player_id=str(player_id),
-                coach_id=current_user.id,
-                status=final_status,
-                assigned_at=datetime.utcnow()
-            )
-            db.add(assignment)
+                assignment = ProgramAssignment(
+                    program_id=new_program.id,
+                    player_id=str(player_id),
+                    coach_id=current_user.id,
+                    status=final_status,
+                    assigned_at=datetime.utcnow()
+                )
+                db.add(assignment)
+        else:
+            print("   -> SQUAD_SESSION: Skipping assignments (Coach Only)")
 
         db.commit()
         return {"status": "success", "program_id": new_program.id}

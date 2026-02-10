@@ -216,4 +216,14 @@ export const createDrill = async (drillData) => {
   }
 };
 
+export const markSquadAttendance = async (squadId, playerIds) => {
+  const response = await api.post(`/squads/${squadId}/attendance`, { player_ids: playerIds });
+  return response.data;
+};
+
+export const fetchSquadLeaderboard = async (squadId) => {
+  const response = await api.get(`/squads/${squadId}/leaderboard`);
+  return response.data;
+};
+
 export default api;

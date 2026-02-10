@@ -12,11 +12,9 @@ import {
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
-// API & Services
 import { fetchMyTeam, fetchDrills, createProgram, fetchSquads, fetchSessionLogs } from '../services/api'; 
 import { generateAIProgram, generateSquadProgram } from '../services/geminiService';
 
-// Modals
 import EditSessionModal from '../components/EditSessionModal';
 import DrillPickerModal from '../components/DrillPickerModal'; 
 import DrillConfigModal from '../components/DrillConfigModal'; 
@@ -28,43 +26,35 @@ const PREMADE_PROGRAMS = [
 ];
 
 export default function ProgramBuilderScreen({ navigation, route }) {
-  
-  const { squadMode, initialPrompt, autoStart } = route.params || {};
+  // ✅ Capture targetIds if passed from SquadDetail
+  const { squadMode, initialPrompt, autoStart, targetIds } = route.params || {};
 
-  // ✅ FIX 1: Only skip to Step 1 if 'autoStart' (Assessment) is true. 
-  // Squads should see the menu (Step 0) to choose Manual vs AI.
   const [step, setStep] = useState(autoStart ? 1 : 0); 
   const [creationMethod, setCreationMethod] = useState(autoStart ? 'AI' : null);
   
-  // User Context
   const [userRole, setUserRole] = useState('PLAYER'); 
   const [userId, setUserId] = useState(null);
   
-  // Data
   const [loading, setLoading] = useState(false);
   const [athletes, setAthletes] = useState([]);
   const [availableDrills, setAvailableDrills] = useState([]);
   const [squads, setSquads] = useState([]);
 
-  // Form State
   const [prompt, setPrompt] = useState(initialPrompt || '');
   const [durationWeeks, setDurationWeeks] = useState('4');
   const [numPlayers, setNumPlayers] = useState('4');
   const [numCourts, setNumCourts] = useState('1');
 
   const [draftProgram, setDraftProgram] = useState({ title: '', description: '', sessions: [] });
-  const [selectedTargets, setSelectedTargets] = useState([]);
+  // ✅ Pre-select target if passed
+  const [selectedTargets, setSelectedTargets] = useState(targetIds || []);
 
-  // Editing State
   const [editingSessionIndex, setEditingSessionIndex] = useState(null);
-  const [showEditModal, setShowEditModal] = useState(false); // AI Adapt Modal
-
-  // Drill Manipulation State
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showDrillPicker, setShowDrillPicker] = useState(false);
-  const [activeSessionIdx, setActiveSessionIdx] = useState(null); // For Adding Drills
-  
+  const [activeSessionIdx, setActiveSessionIdx] = useState(null);
   const [showDrillConfig, setShowDrillConfig] = useState(false);
-  const [editingItem, setEditingItem] = useState(null); // { sIdx, dIdx, item }
+  const [editingItem, setEditingItem] = useState(null);
 
   useEffect(() => {
     const init = async () => {
@@ -87,7 +77,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     init();
   }, []);
 
-  // --- LOGIC: GENERATION ---
   const handleGenerate = async () => {
     if (!prompt.trim()) return Alert.alert("Required", "Please describe your goal.");
 
@@ -134,7 +123,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     }
   };
 
-  // ✅ FIX 2: Manual Start Logic
   const handleManualStart = () => {
     setCreationMethod('MANUAL');
     setDraftProgram({
@@ -144,10 +132,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             { id: `s_${Date.now()}`, title: 'Session 1', items: [], completed: false }
         ]
     });
-    setStep(2); // Go straight to builder
+    setStep(2);
   };
-
-  // --- LOGIC: DRILL MANIPULATION ---
 
   const handleRemoveDrill = (sIdx, dIdx) => {
     const updatedSessions = [...draftProgram.sessions];
@@ -204,14 +190,24 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     setEditingSessionIndex(null);
   };
 
+  // ✅ CRITICAL: Correctly flag Squad Sessions
   const handleFinalize = async (targets) => {
     setLoading(true);
     try {
+        // If we are in "Squad Mode", it's a coach-only session.
+        // If not, it's a player plan (assigned to people).
+        const isSquadSession = squadMode === true;
+
         const payload = {
             title: draftProgram.title,
             description: draftProgram.description || "",
             status: userRole === 'PLAYER' ? 'ACTIVE' : 'PENDING', 
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
+            
+            // ✅ Send Flags to Backend
+            program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
+            squad_id: isSquadSession && targets.length > 0 ? targets[0] : null,
+
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
@@ -230,19 +226,27 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             }))
         };
 
+        console.log("Creating Program Payload:", JSON.stringify(payload, null, 2));
+
         await createProgram(payload);
         setLoading(false);
-        const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
         
-        navigation.dispatch(
-            CommonActions.reset({
-                index: 0,
-                routes: [{ name: 'Main', state: { routes: [{ name: targetTab }] } }],
-            })
-        );
+        // Navigate back intelligently
+        if (isSquadSession) {
+            // Go back to the squad screen
+             navigation.navigate('SquadDetail', { squad: { id: targets[0] } });
+        } else {
+            const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
+            navigation.dispatch(
+                CommonActions.reset({
+                    index: 0,
+                    routes: [{ name: 'Main', state: { routes: [{ name: targetTab }] } }],
+                })
+            );
+        }
         
         setTimeout(() => {
-            Alert.alert("Success", userRole === 'PLAYER' ? "Plan started!" : "Program assigned!");
+            Alert.alert("Success", isSquadSession ? "Squad Session Created!" : "Program Assigned!");
         }, 500);
 
     } catch (e) {
@@ -260,8 +264,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     }
   };
 
-  // --- RENDERERS ---
-  
   const renderStep0 = () => (
     <View style={styles.stepContainer}>
       <Text style={styles.headerTitleLarge}>
@@ -269,24 +271,21 @@ export default function ProgramBuilderScreen({ navigation, route }) {
       </Text>
       <Text style={styles.subText}>Choose how you want to build this.</Text>
       
-      {/* 1. AI Generator */}
       <TouchableOpacity style={styles.methodCard} onPress={() => { setCreationMethod('AI'); setStep(1); }}>
         <View style={[styles.iconBox, { backgroundColor: '#F3E8FF' }]}><Wand2 size={28} color="#9333EA" /></View>
         <View style={{flex: 1}}><Text style={styles.cardTitle}>AI Generator</Text><Text style={styles.cardDesc}>Auto-build a plan.</Text></View>
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
       
-      {/* 2. Manual Creation (✅ ADDED) */}
       <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
         <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
-        <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch using the library.</Text></View>
+        <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch.</Text></View>
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
 
-      {/* 3. From Library */}
       <TouchableOpacity style={styles.methodCard} onPress={() => { setCreationMethod('LIBRARY'); setStep(1); }}>
         <View style={[styles.iconBox, { backgroundColor: '#DBEAFE' }]}><Layers size={28} color="#2563EB" /></View>
-        <View style={{flex: 1}}><Text style={styles.cardTitle}>Templates</Text><Text style={styles.cardDesc}>Choose from pre-made plans.</Text></View>
+        <View style={{flex: 1}}><Text style={styles.cardTitle}>Templates</Text><Text style={styles.cardDesc}>Choose pre-made plans.</Text></View>
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
     </View>
@@ -337,8 +336,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const renderStep2_Review = () => (
     <View style={styles.stepContainer}>
       <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 16}}>
-         <Text style={styles.headerTitleLarge}>Review Program</Text>
-         {/* Edit button goes back to prompt input only if AI was used */}
+         <Text style={styles.headerTitleLarge}>Review {squadMode ? "Squad Session" : "Program"}</Text>
          {userRole !== 'PLAYER' && creationMethod === 'AI' && (
             <TouchableOpacity onPress={() => setStep(1)} style={{ padding: 8 }}>
                 <RefreshCw size={20} color={COLORS.primary}/>
@@ -360,22 +358,16 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                         <Text style={styles.sessionTitle}>{s.title || `Session ${sIdx+1}`}</Text>
                         <Text style={styles.sessionSub}>{s.items?.length || 0} Drills</Text>
                      </View>
-                     {/* AI Adapt Button */}
                      {userRole !== 'PLAYER' && creationMethod !== 'MANUAL' && (
                         <TouchableOpacity style={styles.iconBtn} onPress={() => { setEditingSessionIndex(sIdx); setShowEditModal(true); }}>
                             <Wand2 size={16} color={COLORS.primary} />
                         </TouchableOpacity>
                      )}
                  </View>
-
-                 {/* Drills List */}
                  <View style={styles.drillList}>
                     {s.items?.map((item, dIdx) => {
-                        // ✅ FIX 3: Robust Drill Name Lookup
-                        // The AI returns IDs, we need to show Names.
                         const drillInfo = availableDrills.find(d => d.id === (item.drillId || item.drill_id));
                         const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.name || "Drill");
-
                         return (
                             <View key={dIdx} style={styles.drillRow}>
                                 <View style={{flex: 1}}>
@@ -385,7 +377,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                                         <Text style={styles.drillMeta}> {item.duration || item.targetDurationMin}m</Text>
                                     </View>
                                 </View>
-                                
                                 {userRole !== 'PLAYER' && (
                                     <View style={{flexDirection: 'row', gap: 8}}>
                                         <TouchableOpacity style={styles.editIconBtn} onPress={() => openDrillConfig(sIdx, dIdx, { ...item, drill_name: displayName })}>
@@ -399,8 +390,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                             </View>
                         );
                     })}
-
-                    {/* Add Drill Button */}
                     {userRole !== 'PLAYER' && (
                         <TouchableOpacity style={styles.addDrillBtn} onPress={() => openAddDrill(sIdx)}>
                             <Plus size={16} color={COLORS.primary} />
@@ -414,25 +403,23 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
       {/* MODALS */}
       {showEditModal && editingSessionIndex !== null && (
-          <EditSessionModal 
-            visible={showEditModal} onClose={() => setShowEditModal(false)}
-            session={draftProgram.sessions[editingSessionIndex]} onSave={handleSessionUpdate}
-          />
+          <EditSessionModal visible={showEditModal} onClose={() => setShowEditModal(false)} session={draftProgram.sessions[editingSessionIndex]} onSave={handleSessionUpdate}/>
       )}
-
-      <DrillPickerModal 
-        isOpen={showDrillPicker} onClose={() => setShowDrillPicker(false)}
-        drills={availableDrills} onSelectDrill={handleSelectDrill}
-      />
-
-      <DrillConfigModal 
-        isOpen={showDrillConfig} onClose={() => setShowDrillConfig(false)}
-        item={editingItem?.item} onSave={handleSaveConfig}
-      />
+      <DrillPickerModal isOpen={showDrillPicker} onClose={() => setShowDrillPicker(false)} drills={availableDrills} onSelectDrill={handleSelectDrill}/>
+      <DrillConfigModal isOpen={showDrillConfig} onClose={() => setShowDrillConfig(false)} item={editingItem?.item} onSave={handleSaveConfig}/>
 
       <View style={styles.footerBtnContainer}>
-        <TouchableOpacity style={styles.primaryBtn} disabled={loading} onPress={() => { userRole === 'PLAYER' ? handleFinalize(['SELF']) : setStep(3); }}>
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{userRole === 'PLAYER' ? 'Start Plan Now' : 'Next: Assign Targets'}</Text>}
+        <TouchableOpacity style={styles.primaryBtn} disabled={loading} onPress={() => { 
+            // If Squad Mode, we already have the target ID, skip to save.
+            if (squadMode) {
+                handleFinalize(selectedTargets); 
+            } else if (userRole === 'PLAYER') {
+                handleFinalize(['SELF']);
+            } else {
+                setStep(3); 
+            }
+        }}>
+            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{squadMode ? 'Save Squad Session' : 'Next: Assign Targets'}</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -497,35 +484,28 @@ const styles = StyleSheet.create({
   subText: { fontSize: 14, color: '#64748B', marginBottom: 24 },
   sectionLabel: { fontSize: 12, fontWeight: '800', color: '#94A3B8', marginTop: 16, marginBottom: 8, letterSpacing: 0.5 },
   label: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 8, marginTop: 16 },
-
   methodCard: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#FFF', padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   iconBox: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
   cardDesc: { fontSize: 13, color: '#64748B', lineHeight: 18 },
-
   input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 12, padding: 16, fontSize: 16, color: '#0F172A' },
   textArea: { height: 120 },
-
   reviewCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   reviewTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 8 },
   reviewDesc: { fontSize: 14, color: '#64748B', lineHeight: 20 },
-  
   sessionContainer: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
   sessionHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   sessionTitle: { fontSize: 16, fontWeight: '700', color: '#334155' },
   sessionSub: { fontSize: 12, color: '#64748B' },
   iconBtn: { padding: 8, backgroundColor: '#E0F2FE', borderRadius: 8 },
-
   drillList: { padding: 16, gap: 12 },
   drillRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   drillName: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
   drillMeta: { fontSize: 12, color: '#64748B' },
   editIconBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
   deleteIconBtn: { padding: 8, backgroundColor: '#FEF2F2', borderRadius: 8 },
-
   addDrillBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary, borderStyle: 'dashed' },
   addDrillText: { color: COLORS.primary, fontWeight: '700', fontSize: 14 },
-  
   targetRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
   targetSelected: { borderColor: COLORS.primary, backgroundColor: '#F0FDF4' },
   targetName: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginLeft: 12, flex: 1 },

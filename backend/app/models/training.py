@@ -25,7 +25,7 @@ class Drill(Base):
     target_value = Column(Integer, nullable=True)
     # target_prompt: e.g., "How many shots landed deep?"
     target_prompt = Column(String(255), nullable=True)
-
+    
 class Program(Base):
     __tablename__ = "programs"
 
@@ -33,7 +33,12 @@ class Program(Base):
     title = Column(String(255))
     description = Column(Text, nullable=True)
     creator_id = Column(String, ForeignKey("users.id"))
-    created_at = created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # ✅ NEW FIELDS
+    program_type = Column(String(50), default="PLAYER_PLAN") # 'PLAYER_PLAN' or 'SQUAD_SESSION'
+    squad_id = Column(String, nullable=True) # Linked Squad for Coach Programs
+    
     # Relationships
     sessions = relationship("ProgramSession", back_populates="program")
     creator = relationship("User", back_populates="created_programs")
@@ -114,3 +119,17 @@ class DrillPerformance(Base):
     achieved_value = Column(Integer, nullable=True)
 
     session_log = relationship("SessionLog", back_populates="drill_performances")
+
+# ✅ NEW: Squad Attendance Model
+class SquadAttendance(Base):
+    __tablename__ = "squad_attendance"
+
+    id = Column(String, primary_key=True, default=generate_id)
+    squad_id = Column(String, ForeignKey("squads.id"))
+    player_id = Column(String, ForeignKey("users.id"))
+    date = Column(DateTime, default=datetime.utcnow)
+    
+    # Optional: Link to a specific coach log if you want to tie it to a specific session run
+    # session_log_id = Column(String, ForeignKey("session_logs.id"), nullable=True)
+
+    player = relationship("User")
