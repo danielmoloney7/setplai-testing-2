@@ -226,4 +226,16 @@ export const fetchSquadLeaderboard = async (squadId) => {
   return response.data;
 };
 
+export const fetchMatches = async (userId = null) => {
+  const query = userId ? `?player_id=${userId}` : '';
+  const response = await api.get(`/matches/${query}`);
+  return response.data;
+};
+
+export const createMatchLog = async (data) => {
+  // data can now include { player_id: "..." }
+  const response = await api.post('/matches', data);
+  return response.data;
+};
+
 export default api;
