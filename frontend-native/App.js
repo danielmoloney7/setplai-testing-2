@@ -15,7 +15,11 @@ import AthleteDetailScreen from './src/screens/AthleteDetailScreen';
 import SquadDetailScreen from './src/screens/SquadDetailScreen';
 import SessionLogDetailScreen from './src/screens/SessionLogDetailScreen';
 import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
+
+// ✅ NEW IMPORTS
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
+// import ConsultationScreen from './src/screens/player/ConsultationView'; // Or wherever you saved the AI Chat
 
 const Stack = createNativeStackNavigator();
 
@@ -30,14 +34,14 @@ export default function App() {
           options={{ headerShown: false }} 
         />
         
-        {/* REPLACED 'Dashboard' with 'Main' (The Tab Navigator) */}
+        {/* Main Tab Navigator */}
         <Stack.Screen 
           name="Main" 
           component={BottomTabNavigator} 
           options={{ headerShown: false }} 
         />
 
-        {/* These screens sit ON TOP of the tabs (Full Screen) */}
+        {/* Feature Screens */}
         <Stack.Screen 
           name="ProgramBuilder" 
           component={ProgramBuilderScreen} 
@@ -50,29 +54,11 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* <Stack.Screen 
-          name="CoachAction" 
-          component={CoachActionScreen} 
-          options={{ headerShown: false, presentation: 'modal' }} // Nice modal effect
-        /> */}
-
         <Stack.Screen 
           name="Profile" 
           component={ProfileScreen} 
-          options={{ headerShown: false, presentation: 'modal' }} // Optional: 'modal' looks nice for profile
+          options={{ headerShown: false, presentation: 'modal' }} 
         />
-
-        {/* <Stack.Screen 
-          name="Team" 
-          component={TeamScreen} 
-          options={{ headerShown: false , presentation: 'modal'}} // Optional: 'modal' looks nice for profile
-        />
-
-        <Stack.Screen 
-          name="Drills" 
-          component={DrillLibraryScreen} 
-          options={{ headerShown: false, presentation: 'modal'}} // Optional: 'modal' looks nice for profile
-        /> */}
 
         <Stack.Screen 
           name="ProgramDetail" 
@@ -109,12 +95,21 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* ✅ 2. REGISTER MATCH DIARY */}
+        {/* ✅ REGISTER NEW SCREENS HERE */}
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen} 
+          options={{ headerShown: false, presentation: 'modal' }} // Slide up effect
+        />
+
         <Stack.Screen 
           name="MatchDiary" 
           component={MatchDiaryScreen} 
-          options={{ presentation: 'modal' }} // Optional: Makes it slide up like a card
+          options={{ headerShown: false, presentation: 'modal' }} 
         />
+        
+        {/* If you kept AI Chat */}
+        {/* <Stack.Screen name="Consultation" component={ConsultationScreen} /> */}
 
       </Stack.Navigator>
     </NavigationContainer>
