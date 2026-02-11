@@ -12,7 +12,7 @@ import { fetchPrograms, fetchSessionLogs, updateProgramStatus } from '../service
 export default function PlansScreen({ navigation }) {
   const [activePlans, setActivePlans] = useState([]);
   const [completedPlans, setCompletedPlans] = useState([]);
-  const [pendingPlans, setPendingPlans] = useState([]); // ✅ NEW: Track Pending Separately
+  const [pendingPlans, setPendingPlans] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -50,7 +50,6 @@ export default function PlansScreen({ navigation }) {
                                  program.coach_name !== 'Self-Guided'
             };
 
-            // ✅ Categorize Logic
             if (program.status === 'PENDING') {
                 pending.push(enriched);
             } else if (isFinished || program.status === 'ARCHIVED' || program.status === 'DECLINED') {
@@ -85,12 +84,11 @@ export default function PlansScreen({ navigation }) {
     loadData(true);
   };
 
-  // ✅ NEW: Handle Accept/Decline
   const handleStatusChange = async (programId, newStatus) => {
       try {
           await updateProgramStatus(programId, newStatus);
           Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
-          loadData(); // Reload to move the card
+          loadData(); 
       } catch (e) {
           Alert.alert("Error", "Could not update status.");
       }
@@ -143,7 +141,6 @@ export default function PlansScreen({ navigation }) {
           </View>
       )}
 
-      {/* ✅ NEW: Action Buttons for Pending */}
       {item.status === 'PENDING' && (
           <View style={styles.pendingActions}>
               <TouchableOpacity style={styles.declineBtn} onPress={() => handleStatusChange(item.id, 'DECLINED')}>
@@ -186,7 +183,6 @@ export default function PlansScreen({ navigation }) {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       >
-        {/* PENDING SECTION */}
         {pendingPlans.length > 0 && (
             <>
                 <Text style={[styles.sectionHeader, {color: '#EA580C'}]}>PENDING INVITES ({pendingPlans.length})</Text>
@@ -211,12 +207,7 @@ export default function PlansScreen({ navigation }) {
         )}
       </ScrollView>
 
-      <TouchableOpacity 
-        style={styles.fab} 
-        onPress={() => navigation.navigate('ProgramBuilder', { squadMode: false })}
-      >
-        <Plus size={32} color="#FFF" />
-      </TouchableOpacity>
+      {/* ❌ REMOVED DUPLICATE FAB */}
 
     </SafeAreaView>
   );
@@ -252,9 +243,7 @@ const styles = StyleSheet.create({
   metaText: { fontSize: 12, color: '#64748B', fontWeight: '600' },
   emptyContainer: { alignItems: 'center', padding: 30, borderStyle: 'dashed', borderWidth: 2, borderColor: '#E2E8F0', borderRadius: 16, marginTop: 10 },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
-  fab: { position: 'absolute', bottom: 32, alignSelf: 'center', width: 64, height: 64, borderRadius: 32, backgroundColor: '#15803D', alignItems: 'center', justifyContent: 'center', elevation: 8 },
-
-  // ✅ Pending Action Styles
+  // FAB styles removed
   pendingActions: { flexDirection: 'row', gap: 12, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#FDBA74' },
   acceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#DCFCE7', padding: 10, borderRadius: 8 },
   acceptText: { color: '#16A34A', fontWeight: '700', fontSize: 13 },

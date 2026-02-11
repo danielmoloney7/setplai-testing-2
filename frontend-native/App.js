@@ -1,25 +1,33 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';    
+import { NavigationContainer } from '@react-navigation/native';     
 import { createNativeStackNavigator } from '@react-navigation/native-stack'; 
+
+// Auth Screens
 import LoginScreen from './src/screens/LoginScreen';
+import RegisterScreen from './src/screens/RegisterScreen';
+
+// Main Navigation
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
+
+// Core Feature Screens
 import ProgramBuilderScreen from './src/screens/ProgramBuilderScreen';
 import SessionScreen from './src/screens/SessionScreen';
-import CoachActionScreen from './src/screens/CoachActionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import TeamScreen from './src/screens/TeamScreen';
-import DrillLibraryScreen from './src/screens/DrillLibraryScreen';
 import ProgramDetailScreen from './src/screens/ProgramDetailScreen';
 import AssessmentScreen from './src/screens/AssessmentScreen';
+
+// Team & Detail Screens
 import AthleteDetailScreen from './src/screens/AthleteDetailScreen';
 import SquadDetailScreen from './src/screens/SquadDetailScreen';
+
+// Session Management
 import SessionLogDetailScreen from './src/screens/SessionLogDetailScreen';
 import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
 
-// ✅ NEW IMPORTS
+// ✅ NEW FEATURES
 import NotificationsScreen from './src/screens/NotificationsScreen';
-import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
-// import ConsultationScreen from './src/screens/player/ConsultationView'; // Or wherever you saved the AI Chat
+import MatchListScreen from './src/screens/MatchListScreen';  // The List View
+import MatchDiaryScreen from './src/screens/MatchDiaryScreen'; // The Detail/Form View
 
 const Stack = createNativeStackNavigator();
 
@@ -27,21 +35,28 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator initialRouteName="Login">
-        
+
+        {/* --- AUTHENTICATION --- */}
         <Stack.Screen 
           name="Login" 
           component={LoginScreen} 
           options={{ headerShown: false }} 
         />
-        
-        {/* Main Tab Navigator */}
+
+        <Stack.Screen 
+          name="Register" 
+          component={RegisterScreen} 
+          options={{ headerShown: false }} 
+        />
+              
+        {/* --- MAIN APP (TABS) --- */}
         <Stack.Screen 
           name="Main" 
           component={BottomTabNavigator} 
           options={{ headerShown: false }} 
         />
 
-        {/* Feature Screens */}
+        {/* --- TRAINING FEATURES --- */}
         <Stack.Screen 
           name="ProgramBuilder" 
           component={ProgramBuilderScreen} 
@@ -72,6 +87,7 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
+        {/* --- TEAM & SQUAD MANAGEMENT --- */}
         <Stack.Screen 
           name="AthleteDetail" 
           component={AthleteDetailScreen} 
@@ -84,6 +100,7 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
+        {/* --- SESSION LOGS --- */}
         <Stack.Screen 
           name="SessionLogDetail" 
           component={SessionLogDetailScreen} 
@@ -95,21 +112,27 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* ✅ REGISTER NEW SCREENS HERE */}
+        {/* --- ✅ NEW: NOTIFICATIONS --- */}
         <Stack.Screen 
           name="Notifications" 
           component={NotificationsScreen} 
           options={{ headerShown: false, presentation: 'modal' }} // Slide up effect
         />
 
+        {/* --- ✅ NEW: MATCH DIARY --- */}
+        {/* 1. The LIST of matches (Opened from Dashboard) */}
         <Stack.Screen 
           name="MatchDiary" 
+          component={MatchListScreen} 
+          options={{ headerShown: false }} 
+        />
+
+        {/* 2. The FORM/DETAIL view (Opened from List or Notifications) */}
+        <Stack.Screen 
+          name="MatchDetail" 
           component={MatchDiaryScreen} 
           options={{ headerShown: false, presentation: 'modal' }} 
         />
-        
-        {/* If you kept AI Chat */}
-        {/* <Stack.Screen name="Consultation" component={ConsultationScreen} /> */}
 
       </Stack.Navigator>
     </NavigationContainer>

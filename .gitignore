@@ -28,3 +28,6 @@ backend/setplai_db.db
 .env
 
 backend/app/__pycachce__/
+
+__pycache__/
+*.py[cod]

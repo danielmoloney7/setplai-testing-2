@@ -28,8 +28,7 @@ export default function AthleteDetailScreen({ navigation, route }) {
     }
   };
 
-  // ✅ FALLBACK MAPPING: Logic aligned with Dashboard to prevent 0-minute stats
-  // Supports duration_minutes (Backend), durationMin (Web), and duration (Legacy)
+  // Calculate total minutes
   const totalMinutes = logs.reduce((acc, sess) => {
       const duration = parseInt(sess.duration_minutes || sess.durationMin || sess.duration || 0);
       return acc + duration;
@@ -75,24 +74,28 @@ export default function AthleteDetailScreen({ navigation, route }) {
             </View>
         </View>
 
-        {/* ✅ NEW: Actions Section (Match Diary) */}
         <Text style={styles.sectionTitle}>Actions</Text>
+        
+        {/* ✅ FIX: Correctly navigation params for Match List */}
         <TouchableOpacity 
             style={styles.actionCard} 
-            onPress={() => navigation.navigate('MatchDiary', { userId: athlete.id, userName: athlete.name })}
+            onPress={() => navigation.navigate('MatchDiary', { 
+                athleteId: athlete.id,    // ✅ Must match MatchListScreen param
+                athleteName: athlete.name // ✅ Pass name for header title
+            })}
         >
             <View style={[styles.iconBox, { backgroundColor: '#FEF3C7' }]}>
                 <Trophy size={24} color="#D97706" />
             </View>
             <View style={{flex: 1}}>
                 <Text style={styles.actionTitle}>Match Diary</Text>
-                <Text style={styles.actionDesc}>Set tactics & review results</Text>
+                <Text style={styles.actionDesc}>View schedules & results</Text>
             </View>
             <ChevronRight size={20} color="#CBD5E1" />
         </TouchableOpacity>
 
         {/* History List */}
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
+        <Text style={styles.sectionTitle}>Recent Training</Text>
         {loading ? (
             <ActivityIndicator color={COLORS.primary} style={{ marginTop: 20 }} />
         ) : (
@@ -131,7 +134,6 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
   statLabel: { fontSize: 12, color: '#64748B', fontWeight: '600' },
 
-  // Action Card Styles
   actionCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0', gap: 16, ...SHADOWS.small },
   iconBox: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   actionTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
