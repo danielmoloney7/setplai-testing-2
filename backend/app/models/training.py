@@ -5,6 +5,7 @@ from app.core.database import Base
 from datetime import datetime
 import uuid
 
+
 # Helper to generate unique String IDs
 def generate_id():
     return str(uuid.uuid4())
