@@ -1,20 +1,14 @@
 import React, { useState, useCallback } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, Alert 
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { 
-  ChevronLeft, Bell, Calendar, Users, Info, Check, 
-  Trophy, MessageSquare, ClipboardList, Activity 
-} from 'lucide-react-native';
+import { ChevronLeft, Bell, Calendar, Users, Info, Check } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchNotifications, markNotificationRead, fetchMatches } from '../services/api'; // ✅ Added fetchMatches
+import { fetchNotifications, markNotificationRead } from '../services/api';
 
 export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [navigating, setNavigating] = useState(false); // To show spinner during fetch
 
   const loadData = async () => {
     setLoading(true);
@@ -39,37 +33,10 @@ export default function NotificationsScreen({ navigation }) {
 
       // 2. Navigate based on type (Deep Linking)
       if (item.type === 'PROGRAM_INVITE' && item.reference_id) {
+          // You'd ideally fetch the program details first, or navigate to Plans tab
           navigation.navigate('Main', { screen: 'Plans' }); 
-
       } else if (item.type === 'SQUAD_INVITE' && item.reference_id) {
           navigation.navigate('SquadDetail', { squad: { id: item.reference_id, name: 'Squad Invite' } });
-
-      } else if (item.type && item.type.includes('MATCH')) {
-          // ✅ Handle Match Deep Linking
-          handleMatchNavigation(item.reference_id);
-      }
-  };
-
-  const handleMatchNavigation = async (matchId) => {
-      if (!matchId || navigating) return;
-      
-      setNavigating(true);
-      try {
-          // Fetch fresh list to find the specific match object
-          // (Optimization: In a real app, create a fetchMatchById(id) endpoint)
-          const allMatches = await fetchMatches();
-          const targetMatch = allMatches.find(m => m.id === matchId);
-
-          if (targetMatch) {
-              navigation.navigate('MatchDetail', { matchData: targetMatch });
-          } else {
-              Alert.alert("Error", "Match details could not be found.");
-          }
-      } catch (e) {
-          console.error("Nav Error", e);
-          Alert.alert("Error", "Could not load match details.");
-      } finally {
-          setNavigating(false);
       }
   };
 
@@ -77,13 +44,6 @@ export default function NotificationsScreen({ navigation }) {
       switch(type) {
           case 'PROGRAM_INVITE': return <Calendar size={20} color={COLORS.primary} />;
           case 'SQUAD_INVITE': return <Users size={20} color="#E11D48" />;
-          
-          // ✅ New Match Icons
-          case 'MATCH_RESULT': return <Trophy size={20} color="#D97706" />;
-          case 'MATCH_FEEDBACK': return <MessageSquare size={20} color={COLORS.primary} />;
-          case 'MATCH_TACTICS': return <ClipboardList size={20} color="#0F172A" />;
-          case 'MATCH_LOG': return <Activity size={20} color="#854D0E" />;
-          
           default: return <Info size={20} color="#64748B" />;
       }
   };
@@ -116,9 +76,7 @@ export default function NotificationsScreen({ navigation }) {
             <ChevronLeft size={24} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{width: 24}}>
-            {navigating && <ActivityIndicator size="small" color={COLORS.primary} />}
-        </View>
+        <View style={{width: 24}} />
       </View>
 
       <FlatList
@@ -146,7 +104,7 @@ const styles = StyleSheet.create({
   list: { padding: 16 },
   
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 12 },
-  unreadCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }, 
+  unreadCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }, // Slight green tint for unread
   
   iconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 14, fontWeight: '600', color: '#334155', marginBottom: 2 },

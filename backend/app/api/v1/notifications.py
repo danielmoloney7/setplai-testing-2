@@ -48,27 +48,3 @@ def mark_as_read(
     notif.is_read = True
     db.commit()
     return {"status": "success"}
-
-@router.get("/unread-counts")
-def get_unread_counts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    # Fetch all unread notifications for this user (Coach)
-    unread = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_read == False
-    ).all()
-    
-    total = len(unread)
-    
-    # Group by Player (related_user_id)
-    player_counts = {}
-    for n in unread:
-        if n.related_user_id:
-            player_counts[n.related_user_id] = player_counts.get(n.related_user_id, 0) + 1
-            
-    return {
-        "total": total,
-        "players": player_counts # { "player_id_1": 2, "player_id_2": 5 }
-    }

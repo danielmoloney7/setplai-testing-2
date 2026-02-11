@@ -113,12 +113,11 @@ export const generateOnboardingPlans = async (userInfo, drills) => {
 /**
  * 2. Generate AI Program (The Core Builder Function)
  * Used in "ProgramCreator.tsx" and "PlayerDashboard.tsx"
- * ✅ UPDATED: Now strictly enforces Profile Data (Level, Goals, Experience)
  */
 export const generateAIProgram = async (
   prompt,
   drills,
-  currentUserDetails, // Expects { id, role, level, goals, yearsExperience }
+  currentUserDetails, // { id, name, level, goals }
   history = [],
   config = { weeks: 4 },
   squadConstraints = null // { players: 4, courts: 1 }
@@ -154,17 +153,11 @@ export const generateAIProgram = async (
       .map(([drillId, _]) => drillId);
   
   const strengthsContext = strengths.length > 0
-    ? `Player Strengths (from history): ${strengths.join(', ')}.` : 'No specific strengths recorded yet.';
+    ? `Player Strengths: ${strengths.join(', ')}.` : '';
   const weaknessesContext = weaknesses.length > 0
-    ? `Player Weaknesses (from history): ${weaknesses.join(', ')}.` : 'No specific weaknesses recorded yet.';
-  
-  // ✅ ENHANCED CONTEXT: Explicitly format Goals & Experience
-  const goalsArray = Array.isArray(currentUserDetails.goals) ? currentUserDetails.goals : [currentUserDetails.goals];
-  const goalsContext = goalsArray.length > 0 
-    ? `Player Goals: ${goalsArray.join(', ')}.` : 'Goal: General Improvement';
-  
-  const experienceContext = currentUserDetails.yearsExperience 
-    ? `Years Experience: ${currentUserDetails.yearsExperience} years.` : '';
+    ? `Player Weaknesses: ${weaknesses.join(', ')}.` : '';
+  const goalsContext = currentUserDetails.goals?.length > 0 
+    ? `Player Goals: ${currentUserDetails.goals.join(', ')}.` : '';
 
   // --- Squad Constraints ---
   let constraintContext = '';
@@ -178,41 +171,30 @@ export const generateAIProgram = async (
 
   const systemInstruction = `
     You are an expert elite tennis coach.
+    Target Audience Level: ${currentUserDetails.level || 'Intermediate'}
+    ${goalsContext}
     
-    TARGET ATHLETE PROFILE:
-    - Level: ${currentUserDetails.level || 'Intermediate'}
-    - ${experienceContext}
-    - ${goalsContext}
-    
-    PERFORMANCE HISTORY:
-    - ${strengthsContext}
-    - ${weaknessesContext}
+    History:
+    ${strengthsContext}
+    ${weaknessesContext}
 
-    DRILL LIBRARY AVAILABLE:
+    Drill Library:
     ${drillContext}
     
     ${constraintContext}
 
-    TASK:
-    Create a ${config.weeks || 4}-session training program (1 session per week).
-    Each session must have 1 warmup and 3 main drills.
-    
-    CRITICAL INSTRUCTIONS:
-    1. Select drills that specifically address the "Player Goals" and "Weaknesses" identified above.
-    2. Adjust intensity/volume based on "Level" and "Years Experience".
-    3. If the goal is specific (e.g. "Serve"), ensure at least 50% of drills focus on that stroke.
-    
-    Instruction from User: ${prompt}
+    Task: Create a ${config.weeks || 4}-session program. Each session needs 1 warmup and 3 main drills.
+    Instruction: ${prompt}
     
     Return JSON format schema:
     {
       "title": "Program Title",
-      "description": "Specific description explaining WHY these drills were chosen based on the player's profile.",
+      "description": "Short description",
       "sessions": [
         {
           "title": "Session Title",
           "items": [
-            { "drillId": "d1", "targetDurationMin": 15, "notes": "Coach notes on technical focus", "sets": 3, "reps": 10, "mode": "Cooperative" }
+            { "drillId": "d1", "targetDurationMin": 15, "notes": "Coach notes", "sets": 3, "reps": 10, "mode": "Cooperative" }
           ]
         }
       ]
