@@ -5,6 +5,7 @@ from app.core.database import Base
 from datetime import datetime
 import uuid
 
+
 # Helper to generate unique String IDs
 def generate_id():
     return str(uuid.uuid4())
@@ -133,3 +134,25 @@ class SquadAttendance(Base):
     # session_log_id = Column(String, ForeignKey("session_logs.id"), nullable=True)
 
     player = relationship("User")
+
+class MatchEntry(Base):
+    __tablename__ = "match_entries"
+
+    id = Column(String, primary_key=True, default=generate_id)
+    user_id = Column(String, ForeignKey("users.id"))
+    
+    # Match Details
+    date = Column(DateTime, default=datetime.utcnow)
+    event_name = Column(String(255))
+    opponent_name = Column(String(255))
+    round = Column(String(100), nullable=True) # e.g., "Quarter Final"
+    
+    # Pre-Match (Tactics Diary)
+    tactics = Column(Text, nullable=True)
+    
+    # Post-Match (Results Diary)
+    score = Column(String(100), nullable=True)
+    result = Column(String(50), nullable=True) # 'WIN' | 'LOSS' | 'DRAW'
+    reflection = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

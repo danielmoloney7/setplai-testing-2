@@ -107,7 +107,7 @@ export default function LoginScreen({ navigation }) {
             title="Create New Account" 
             variant="outline" 
             fullWidth 
-            onPress={() => navigation.navigate('Register')} 
+            onPress={() => Alert.alert("Coming Soon", "Registration screen is next!")}
           />
         </View>
 
