@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordRequestForm  # <--- NEW IMPORT
+from fastapi.security import OAuth2PasswordRequestForm
 from app.core.database import get_db
 from app.models.user import User
-from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.security import get_password_hash, verify_password, create_access_token, get_current_user 
 from pydantic import BaseModel
+from typing import Optional
 
 router = APIRouter()
 
@@ -13,6 +14,11 @@ class UserCreate(BaseModel):
     email: str
     password: str
     role: str = "player"
+    age: Optional[int] = None
+    years_experience: Optional[int] = 0
+    level: Optional[str] = "Beginner"
+    goals: Optional[str] = None
+
 
 @router.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -23,7 +29,16 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     
     # 2. Hash password and save
     hashed_pwd = get_password_hash(user.password)
-    new_user = User(email=user.email, hashed_password=hashed_pwd, role=user.role)
+    new_user = User(
+        email=user.email, 
+        hashed_password=hashed_pwd, 
+        role=user.role,
+        age=user.age,
+        years_experience=user.years_experience,
+        level=user.level,
+        goals=user.goals,
+        name=user.email.split('@')[0]
+    )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)

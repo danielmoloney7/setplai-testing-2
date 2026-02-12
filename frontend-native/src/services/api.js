@@ -4,9 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // 1. iOS Simulator: 'http://127.0.0.1:8000/api/v1'
 // 2. Android Emulator: 'http://10.0.2.2:8000/api/v1'
 // 3. Real Phone: 'http://YOUR_LAPTOP_IP:8000/api/v1'
-// const API_URL = 'http://10.3.23.151:8000/api/v1'; 
+const API_URL = 'http://10.3.23.151:8000/api/v1'; 
 
-const API_URL = 'http://192.168.0.15:8000/api/v1'; 
+// const API_URL = 'http://192.168.0.15:8000/api/v1'; 
 const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -237,5 +237,54 @@ export const createMatchLog = async (data) => {
   const response = await api.post('/matches', data);
   return response.data;
 };
+
+export const submitCoachFeedback = async (matchId, feedbackText) => {
+  try {
+    const response = await api.put(`/matches/${matchId}/feedback`, { feedback: feedbackText });
+    return response.data;
+  } catch (error) {
+    console.error("Feedback Error:", error);
+    throw error;
+  }
+};
+
+export const registerUser = async (userData) => {
+  try {
+    const response = await api.post('/auth/register', {
+      email: userData.email,
+      password: userData.password,
+      role: userData.role.toLowerCase(),
+      age: parseInt(userData.age) || null,
+      years_experience: parseInt(userData.yearsExperience) || 0,
+      level: userData.level,
+      goals: userData.goals
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Registration Error:", error.response?.data || error.message);
+    throw error; 
+  }
+};
+
+export const updateMatchDetails = async (matchId, updates) => {
+  try {
+    const response = await api.patch(`/matches/${matchId}`, updates);
+    return response.data;
+  } catch (error) {
+    console.error("Update Match Error:", error);
+    throw error;
+  }
+};
+
+export const fetchUnreadCounts = async () => {
+  const response = await api.get('/notifications/unread-counts');
+  return response.data;
+};
+
+export const fetchAthletes = async () => {
+  const response = await api.get('/squads/athletes'); // Matches the endpoint above
+  return response.data;
+};
+
 
 export default api;

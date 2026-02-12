@@ -17,6 +17,8 @@ class SquadCreate(BaseModel):
     name: str
     level: Optional[str] = "Mixed"
     initial_members: List[str] = []
+    active_program_name: Optional[str] = None
+    completion_percentage: int = 0
 
 class AddMemberRequest(BaseModel):
     player_id: str
@@ -38,6 +40,13 @@ class LeaderboardEntry(BaseModel):
     attendance_count: int
     sessions_completed: int
     drill_score: int
+
+class MemberProgress(BaseModel):
+    id: str
+    name: str
+    sessions_completed: int
+    total_sessions: int
+    completion_percentage: int
 
 # --- ENDPOINTS ---
 
