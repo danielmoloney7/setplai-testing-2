@@ -11,6 +11,8 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=generate_id)
+    age = Column(Integer)
+    years_experience = Column(Integer)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     role = Column(String)
@@ -18,7 +20,7 @@ class User(Base):
     goals = Column(String, nullable=True)
     xp = Column(Integer, default=0)
     coach_id = Column(String, ForeignKey("users.id"), nullable=True)
-
+    level = Column(String)
     created_programs = relationship("Program", back_populates="creator")
     session_logs = relationship("SessionLog", back_populates="player")
     players = relationship("User", backref=backref("coach", remote_side=[id]))

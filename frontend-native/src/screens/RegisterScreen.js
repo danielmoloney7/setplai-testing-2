@@ -4,10 +4,9 @@ import {
   KeyboardAvoidingView, Platform, TouchableOpacity, ScrollView 
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerUser } from '../services/api';
-import api from '../services/api'; // Needed for auto-login call
+import api, { registerUser } from '../services/api';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { Check, ChevronDown } from 'lucide-react-native';
+import { Check, ChevronLeft } from 'lucide-react-native'; // ✅ Added ChevronLeft
 
 const LEVELS = ["Beginner", "Intermediate", "Advanced"];
 
@@ -36,7 +35,7 @@ export default function RegisterScreen({ navigation }) {
       // 1. Register
       await registerUser(formData);
 
-      // 2. Auto-Login (Immediate)
+      // 2. Auto-Login
       const loginFormData = new URLSearchParams();
       loginFormData.append('username', formData.email.toLowerCase()); 
       loginFormData.append('password', formData.password);
@@ -48,11 +47,12 @@ export default function RegisterScreen({ navigation }) {
       const { access_token, role, name } = loginRes.data;
       
       // 3. Save Session
+      const normalizedRole = role || (formData.role === 'COACH' ? 'COACH' : 'PLAYER');
       await AsyncStorage.setItem('access_token', access_token);
-      await AsyncStorage.setItem('user_role', role.toUpperCase()); 
-      await AsyncStorage.setItem('user_name', name);
+      await AsyncStorage.setItem('user_role', normalizedRole.toUpperCase()); 
+      await AsyncStorage.setItem('user_name', name || formData.email.split('@')[0]);
 
-      // 4. Navigate to Main
+      // 4. Navigate
       navigation.replace('Main');
 
     } catch (error) {
@@ -66,15 +66,21 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.content}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
         
-        {/* Header */}
+        {/* Header with Back Button */}
         <View style={styles.header}>
-          <Text style={styles.logoText}>setplai</Text>
-          <Text style={styles.subtitle}>Create your account</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <ChevronLeft size={28} color={COLORS.primary} />
+          </TouchableOpacity>
+          <View style={{alignItems: 'center'}}>
+            <Text style={styles.logoText}>setplai</Text>
+            <Text style={styles.subtitle}>Create your account</Text>
+          </View>
+          <View style={{width: 28}} /> 
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           
           {/* Role Selector */}
           <View style={styles.roleContainer}>
@@ -90,11 +96,12 @@ export default function RegisterScreen({ navigation }) {
             ))}
           </View>
 
-          {/* Core Info */}
+          {/* Credentials */}
           <Text style={styles.label}>Credentials</Text>
           <TextInput 
             style={styles.input} 
             placeholder="Email" 
+            placeholderTextColor="#94A3B8"
             value={formData.email} 
             onChangeText={t => updateField('email', t)} 
             autoCapitalize="none" 
@@ -103,17 +110,19 @@ export default function RegisterScreen({ navigation }) {
           <TextInput 
             style={styles.input} 
             placeholder="Password" 
+            placeholderTextColor="#94A3B8"
             value={formData.password} 
             onChangeText={t => updateField('password', t)} 
             secureTextEntry 
           />
 
-          {/* Profile Details */}
+          {/* Profile Details (Only for Players mostly, but useful for coaches too) */}
           <Text style={styles.label}>Profile</Text>
           <View style={styles.row}>
               <TextInput 
                 style={[styles.input, { flex: 1 }]} 
                 placeholder="Age" 
+                placeholderTextColor="#94A3B8"
                 value={formData.age} 
                 onChangeText={t => updateField('age', t)} 
                 keyboardType="numeric"
@@ -121,6 +130,7 @@ export default function RegisterScreen({ navigation }) {
               <TextInput 
                 style={[styles.input, { flex: 1 }]} 
                 placeholder="Yrs Exp." 
+                placeholderTextColor="#94A3B8"
                 value={formData.yearsExperience} 
                 onChangeText={t => updateField('yearsExperience', t)} 
                 keyboardType="numeric"
@@ -140,9 +150,12 @@ export default function RegisterScreen({ navigation }) {
               ))}
           </View>
 
+          {/* Goals Input */}
+          <Text style={styles.label}>Goals</Text>
           <TextInput 
-            style={[styles.input, { height: 80, textAlignVertical: 'top' }]} 
+            style={[styles.input, styles.textArea]} 
             placeholder="What is your main goal? (e.g. Better Serve)" 
+            placeholderTextColor="#94A3B8"
             value={formData.goals} 
             onChangeText={t => updateField('goals', t)} 
             multiline
@@ -153,7 +166,7 @@ export default function RegisterScreen({ navigation }) {
             onPress={handleRegisterAndLogin}
             disabled={loading}
           >
-              <Text style={styles.mainBtnText}>{loading ? "Creating..." : "Create & Login"}</Text>
+              <Text style={styles.mainBtnText}>{loading ? "Creating..." : "Create Account"}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('Login')}>
@@ -170,24 +183,24 @@ export default function RegisterScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  content: { flex: 1, padding: 24 },
-  header: { alignItems: 'center', marginBottom: 24, marginTop: 20 },
-  logoText: { fontSize: 32, fontWeight: '800', color: COLORS.primary, letterSpacing: -1 },
-  subtitle: { fontSize: 16, color: '#64748B' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginTop: 10, marginBottom: 20 },
+  backBtn: { padding: 8, marginLeft: -8 },
+  logoText: { fontSize: 24, fontWeight: '800', color: COLORS.primary, letterSpacing: -0.5 },
+  subtitle: { fontSize: 14, color: '#64748B' },
+  
+  scrollContent: { padding: 24, paddingTop: 0 },
   
   label: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginBottom: 8, marginTop: 16, textTransform: 'uppercase' },
-  
   input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 14, fontSize: 16, color: '#0F172A', marginBottom: 12 },
+  textArea: { height: 100, textAlignVertical: 'top' },
   row: { flexDirection: 'row', gap: 12 },
 
-  // Role
   roleContainer: { flexDirection: 'row', gap: 12, marginBottom: 8 },
   roleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#FFF' },
   roleBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   roleText: { fontWeight: '700', color: '#64748B' },
   roleTextActive: { color: '#FFF' },
 
-  // Level
   levelRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   levelChip: { flex: 1, alignItems: 'center', padding: 10, borderRadius: 20, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#F1F5F9' },
   levelChipActive: { backgroundColor: '#F0FDF4', borderColor: COLORS.primary },
@@ -197,6 +210,6 @@ const styles = StyleSheet.create({
   mainBtn: { backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 24, ...SHADOWS.medium },
   mainBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 
-  loginLink: { alignItems: 'center', marginTop: 24 },
+  loginLink: { alignItems: 'center', marginTop: 24, marginBottom: 40 },
   loginText: { color: '#64748B', fontSize: 14 }
 });

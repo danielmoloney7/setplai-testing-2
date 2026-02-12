@@ -122,8 +122,15 @@ def create_match_log(
             if match.score: msg = f"{player.name} logged a result vs {match.opponent_name}."
             
             background_tasks.add_task(
-                create_notification, db, coach_id, "Match Update", msg, "MATCH_LOG", new_match.id, player.id # ✅ Pass Player ID
+                create_notification, db, coach_id, "Match Update", msg, "MATCH_LOG", new_match.id, player.id
             )
+
+    # ✅ ADD THIS BLOCK: Notify Player if Coach creates match
+    if "COACH" in current_user.role.upper() and target_id != current_user.id:
+        background_tasks.add_task(
+            create_notification, db, target_id, "New Match Scheduled", 
+            f"Coach added a match vs {match.opponent_name}", "MATCH_LOG", new_match.id, current_user.id
+        )
 
     return new_match
 

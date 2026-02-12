@@ -20,13 +20,14 @@ export default function MatchDiaryScreen({ navigation, route }) {
   const [editingMatch, setEditingMatch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState('PLAYER');
-
+  
   // Form State
   const [event, setEvent] = useState('');
   const [opponent, setOpponent] = useState('');
   const [tactics, setTactics] = useState('');
   const [score, setScore] = useState('');
   const [reflection, setReflection] = useState('');
+  const [round, setRound] = useState('Round 1');
 
   useEffect(() => {
       AsyncStorage.getItem('user_role').then(r => setRole(r?.toUpperCase() || 'PLAYER'));
@@ -53,6 +54,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
           date: new Date().toISOString(),
           event_name: event,
           opponent_name: opponent,
+          round: round,
           tactics: tactics,
           player_id: userId // ✅ Create for this player if Coach
         });
@@ -73,6 +75,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setTactics(match.tactics || '');
     setScore(match.score || '');
     setReflection(match.reflection || '');
+    setRound(match.round || 'Round 1');
     setModalVisible(true);
   };
 
@@ -83,6 +86,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setTactics('');
     setScore('');
     setReflection('');
+    setRound('Round 1');
   };
 
   const filteredMatches = matches.filter(m => {
@@ -189,6 +193,14 @@ export default function MatchDiaryScreen({ navigation, route }) {
                             onChangeText={setTactics} 
                             multiline 
                             placeholder={role === 'COACH' ? "Coach instructions..." : "My game plan..."}
+                        />
+
+                        <Text style={styles.label}>Round</Text>
+                        <TextInput 
+                          style={styles.input} 
+                          value={round} 
+                          onChangeText={setRound} 
+                          placeholder="e.g. Semi-Final" 
                         />
                     </>
                 )}
