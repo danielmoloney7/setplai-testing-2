@@ -145,7 +145,13 @@ class MatchEntry(Base):
     date = Column(DateTime, default=datetime.utcnow)
     event_name = Column(String(255))
     opponent_name = Column(String(255))
-    round = Column(String(100), nullable=True) # e.g., "Quarter Final"
+    round = Column(String(100), nullable=True)
+    
+    # ✅ NEW FIELDS (Added these)
+    match_format = Column(String(50), default="Singles") # Singles/Doubles
+    partner_name = Column(String(255), nullable=True)
+    surface = Column(String(50), nullable=True) # Clay, Hard, Grass
+    environment = Column(String(50), nullable=True) # Indoor/Outdoor
     
     # Pre-Match (Tactics Diary)
     tactics = Column(Text, nullable=True)
@@ -154,5 +160,8 @@ class MatchEntry(Base):
     score = Column(String(100), nullable=True)
     result = Column(String(50), nullable=True) # 'WIN' | 'LOSS' | 'DRAW'
     reflection = Column(Text, nullable=True)
+    
+    # ✅ ADDED: Coach Feedback
+    coach_feedback = Column(Text, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

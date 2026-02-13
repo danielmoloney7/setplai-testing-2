@@ -1,18 +1,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, 
-  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator 
+  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Switch, Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { ChevronLeft, Plus, Trophy, Edit3, X, User } from 'lucide-react-native';
+import { ChevronLeft, Plus, Trophy, Edit3, X, Calendar, ClipboardList, User, Search, Check } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchMatches, createMatchLog, updateMatchLog } from '../services/api';
+import { fetchMatches, createMatchLog, updateMatchDetails, fetchMyTeam } from '../services/api'; // ✅ Added fetchMyTeam
 
 export default function MatchDiaryScreen({ navigation, route }) {
-  // ✅ Accept userId from params (Coach View) or default to self
-  const { userId, userName } = route.params || {};
+  // If navigated from a Player Profile, userId is pre-filled.
+  // If navigated from Coach Dashboard, userId might be null initially.
+  const { userId: paramUserId, userName: paramUserName } = route.params || {};
   
   const [matches, setMatches] = useState([]);
   const [activeTab, setActiveTab] = useState('UPCOMING');
@@ -21,61 +22,123 @@ export default function MatchDiaryScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState('PLAYER');
   
+  // ✅ COACHING STATE
+  const [myAthletes, setMyAthletes] = useState([]);
+  const [selectedAthlete, setSelectedAthlete] = useState(null); // { id, name }
+  const [athleteSearch, setAthleteSearch] = useState('');
+
   // Form State
   const [event, setEvent] = useState('');
+  const [round, setRound] = useState(''); 
   const [opponent, setOpponent] = useState('');
   const [tactics, setTactics] = useState('');
+  
+  // Post-Match State
+  const [isComplete, setIsComplete] = useState(false); 
   const [score, setScore] = useState('');
+  const [result, setResult] = useState('Win'); 
   const [reflection, setReflection] = useState('');
-  const [round, setRound] = useState('Round 1');
 
+  // --- INITIALIZATION ---
   useEffect(() => {
-      AsyncStorage.getItem('user_role').then(r => setRole(r?.toUpperCase() || 'PLAYER'));
-  }, []);
+      const init = async () => {
+          const userRole = await AsyncStorage.getItem('user_role');
+          const safeRole = userRole?.toUpperCase() || 'PLAYER';
+          setRole(safeRole);
 
+          // If Coach, load team list for the picker
+          if (safeRole === 'COACH') {
+              const team = await fetchMyTeam();
+              setMyAthletes(team);
+          }
+          
+          // Pre-select athlete if passed via params
+          if (paramUserId) {
+              setSelectedAthlete({ id: paramUserId, name: paramUserName || 'Athlete' });
+          }
+      };
+      init();
+  }, [paramUserId, paramUserName]);
+
+  // --- LOAD MATCHES ---
   const loadData = async () => {
     setLoading(true);
     try {
-      // ✅ Fetch specific user's matches if userId is present
-      const data = await fetchMatches(userId);
+      // If Coach & No Athlete Selected -> fetch ALL or empty? Let's fetch selected or empty.
+      const targetId = selectedAthlete?.id || paramUserId || null;
+      
+      // If Coach and no target selected yet, maybe don't fetch anything or fetch all?
+      // For now, let's fetch matches for the *selected* context.
+      const data = await fetchMatches(targetId); 
       setMatches(data);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
-  useFocusEffect(useCallback(() => { loadData(); }, [userId]));
+  useFocusEffect(useCallback(() => { loadData(); }, [selectedAthlete])); // Reload when athlete changes
 
+  // --- SAVE HANDLER ---
   const handleSave = async () => {
+    // ✅ 1. VALIDATION: Coach MUST select a player
+    if (role === 'COACH' && !selectedAthlete?.id) {
+        Alert.alert("Select Athlete", "Please tag the player this match belongs to.");
+        return;
+    }
+
+    if (!event.trim() || !opponent.trim() || !round.trim()) {
+        Alert.alert("Missing Details", "Please enter Event Name, Round, and Opponent.");
+        return;
+    }
+
     try {
+      const payload = {
+        event_name: event,
+        opponent_name: opponent,
+        round: round, 
+        tactics: tactics,
+        player_id: selectedAthlete?.id || null, // ✅ Send Player ID so they get notified
+        score: isComplete ? score : null,
+        result: isComplete ? result : 'Scheduled',
+        reflection: isComplete ? reflection : null,
+      };
+
       if (editingMatch) {
-        await updateMatchLog(editingMatch.id, { score, reflection, tactics });
+        await updateMatchDetails(editingMatch.id, payload);
       } else {
         await createMatchLog({
-          date: new Date().toISOString(),
-          event_name: event,
-          opponent_name: opponent,
-          round: round,
-          tactics: tactics,
-          player_id: userId // ✅ Create for this player if Coach
+            ...payload,
+            date: new Date().toISOString(),
         });
       }
       setModalVisible(false);
       resetForm();
       loadData();
-      Alert.alert("Success", "Match entry saved.");
+      Alert.alert("Success", "Match entry saved & player notified.");
     } catch (e) {
+      console.error("Save Match Error:", e);
       Alert.alert("Error", "Could not save match.");
     }
   };
 
   const openEdit = (match) => {
     setEditingMatch(match);
-    setEvent(match.event_name);
-    setOpponent(match.opponent_name);
+    setEvent(match.event_name || '');
+    setOpponent(match.opponent_name || '');
+    setRound(match.round || ''); 
     setTactics(match.tactics || '');
+    
+    // Set Athlete Context for Edit (if coach is editing a specific match)
+    if (role === 'COACH' && match.user_id) {
+        const found = myAthletes.find(a => a.id === match.user_id);
+        if (found) setSelectedAthlete(found);
+    }
+
+    const hasResults = !!match.score || (match.result && match.result !== 'Scheduled');
+    setIsComplete(hasResults);
+    
     setScore(match.score || '');
+    setResult(match.result && match.result !== 'Scheduled' ? match.result : 'Win');
     setReflection(match.reflection || '');
-    setRound(match.round || 'Round 1');
     setModalVisible(true);
   };
 
@@ -83,42 +146,50 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setEditingMatch(null);
     setEvent('');
     setOpponent('');
+    setRound('');
     setTactics('');
+    setIsComplete(false);
     setScore('');
+    setResult('Win');
     setReflection('');
-    setRound('Round 1');
+    // Don't reset selectedAthlete if it was passed via params (locked context)
+    if (!paramUserId) setSelectedAthlete(null);
   };
 
   const filteredMatches = matches.filter(m => {
-    const hasResult = m.score || m.result;
-    return activeTab === 'PAST' ? hasResult : !hasResult;
+    const isFinished = m.score || (m.result && m.result !== 'Scheduled');
+    return activeTab === 'PAST' ? isFinished : !isFinished;
   });
 
+  // --- RENDER HELPERS ---
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => openEdit(item)}>
       <View style={styles.cardHeader}>
-        <Text style={styles.date}>{new Date(item.date).toDateString()}</Text>
+        <View style={{flexDirection:'row', gap: 6, alignItems:'center'}}>
+             <Calendar size={14} color="#94A3B8"/>
+             <Text style={styles.date}>{new Date(item.date).toLocaleDateString()}</Text>
+        </View>
         <Text style={styles.round}>{item.round || 'Match'}</Text>
       </View>
       
       <View style={styles.versusRow}>
-        <Text style={styles.meText}>{userName || 'Me'}</Text>
-        <Text style={styles.vsText}>vs</Text>
-        <Text style={styles.oppText}>{item.opponent_name}</Text>
+        <Text style={styles.eventName}>{item.event_name}</Text>
+        <Text style={styles.vsText}>•</Text>
+        <Text style={styles.oppText}>vs {item.opponent_name}</Text>
       </View>
-      
-      <Text style={styles.eventName}>{item.event_name}</Text>
 
       {item.score ? (
-         <View style={styles.resultBadge}>
-             <Trophy size={14} color="#FFF" />
-             <Text style={styles.resultText}>{item.score}</Text>
+         <View style={[styles.resultBadge, item.result === 'Loss' ? styles.lossBadge : styles.winBadge]}>
+             <Trophy size={14} color={item.result === 'Loss' ? '#EF4444' : '#10B981'} />
+             <Text style={[styles.resultText, item.result === 'Loss' ? {color:'#EF4444'} : {color:'#10B981'}]}>
+                 {item.result ? item.result.toUpperCase() : 'COMPLETE'} - {item.score}
+             </Text>
          </View>
       ) : (
          <View style={styles.tacticsPreview}>
-             <Edit3 size={14} color="#64748B" />
+             <ClipboardList size={14} color="#64748B" />
              <Text style={styles.tacticsText} numberOfLines={1}>
-                {item.tactics ? "Tactics set" : "Tap to add tactics"}
+                {item.tactics ? "Game plan active" : "Tap to set game plan"}
              </Text>
          </View>
       )}
@@ -131,8 +202,13 @@ export default function MatchDiaryScreen({ navigation, route }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <ChevronLeft size={24} color="#0F172A" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{userName ? `${userName}'s Diary` : 'Match Diary'}</Text>
-        <View style={{width: 24}} />
+        <View>
+            <Text style={styles.headerTitle}>Match Diary</Text>
+            {selectedAthlete && <Text style={styles.headerSub}>{selectedAthlete.name}</Text>}
+        </View>
+        <TouchableOpacity style={styles.addIconBtn} onPress={() => { resetForm(); setModalVisible(true); }}>
+            <Plus size={24} color={COLORS.primary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.tabRow}>
@@ -152,79 +228,135 @@ export default function MatchDiaryScreen({ navigation, route }) {
             renderItem={renderItem}
             keyExtractor={item => item.id}
             contentContainerStyle={styles.list}
-            ListEmptyComponent={<Text style={styles.emptyText}>No matches found.</Text>}
+            ListEmptyComponent={
+                <View style={{alignItems:'center', marginTop: 40}}>
+                    <Text style={styles.emptyText}>
+                        {role === 'COACH' && !selectedAthlete 
+                            ? "Select a player to view their matches." 
+                            : "No matches found."}
+                    </Text>
+                </View>
+            }
           />
       )}
 
-      {/* Show FAB if it's my diary OR if I'm a coach adding for a player */}
-      <TouchableOpacity style={styles.fab} onPress={() => { resetForm(); setModalVisible(true); }}>
-        <Plus size={32} color="#FFF" />
-      </TouchableOpacity>
-
-      {/* Edit/Create Modal */}
-      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
+      {/* --- CREATE/EDIT MODAL --- */}
+      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1}}>
         <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                    {editingMatch ? (editingMatch.score ? "Review Match" : "Match Prep") : "New Match"}
+                    {editingMatch ? "Edit Match" : "New Match Entry"}
                 </Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}><X size={24} color="#0F172A"/></TouchableOpacity>
             </View>
             
-            <ScrollView contentContainerStyle={{padding: 20}}>
-                {/* --- COACH / PRE-MATCH SECTION --- */}
-                {(!editingMatch || !editingMatch.score) && (
-                    <>
-                        <View style={styles.sectionBadge}>
-                            <Text style={styles.sectionBadgeText}>PRE-MATCH PLANNING</Text>
+            <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 50}}>
+                
+                {/* ✅ COACH: PLAYER SELECTOR */}
+                {role === 'COACH' && !editingMatch && (
+                    <View style={styles.sectionContainer}>
+                        <Text style={styles.sectionHeader}>ASSIGN TO PLAYER</Text>
+                        <View style={styles.athleteSelector}>
+                            {myAthletes.map(athlete => (
+                                <TouchableOpacity 
+                                    key={athlete.id}
+                                    style={[styles.athleteChip, selectedAthlete?.id === athlete.id && styles.athleteChipActive]}
+                                    onPress={() => setSelectedAthlete(athlete)}
+                                >
+                                    <User size={14} color={selectedAthlete?.id === athlete.id ? '#FFF' : '#64748B'} style={{marginRight:6}}/>
+                                    <Text style={[styles.athleteChipText, selectedAthlete?.id === athlete.id && {color:'#FFF'}]}>
+                                        {athlete.name}
+                                    </Text>
+                                    {selectedAthlete?.id === athlete.id && <Check size={14} color="#FFF" style={{marginLeft:4}}/>}
+                                </TouchableOpacity>
+                            ))}
                         </View>
-                        
-                        <Text style={styles.label}>Event Name</Text>
-                        <TextInput style={styles.input} value={event} onChangeText={setEvent} placeholder="e.g. Club Championship" editable={!editingMatch}/>
-                        
-                        <Text style={styles.label}>Opponent</Text>
-                        <TextInput style={styles.input} value={opponent} onChangeText={setOpponent} placeholder="Opponent Name" editable={!editingMatch}/>
-                        
-                        <Text style={styles.label}>Tactical Plan</Text>
-                        <TextInput 
-                            style={[styles.input, styles.textArea]} 
-                            value={tactics} 
-                            onChangeText={setTactics} 
-                            multiline 
-                            placeholder={role === 'COACH' ? "Coach instructions..." : "My game plan..."}
-                        />
-
-                        <Text style={styles.label}>Round</Text>
-                        <TextInput 
-                          style={styles.input} 
-                          value={round} 
-                          onChangeText={setRound} 
-                          placeholder="e.g. Semi-Final" 
-                        />
-                    </>
+                    </View>
                 )}
 
-                {/* --- POST-MATCH SECTION (Typically Player) --- */}
-                {editingMatch && (
-                    <>
-                        <View style={[styles.sectionBadge, {backgroundColor: '#F1F5F9', marginTop: 24}]}>
-                            <Text style={[styles.sectionBadgeText, {color: '#475569'}]}>POST-MATCH REFLECTION</Text>
+                {/* --- MATCH DETAILS --- */}
+                <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionHeader}>MATCH DETAILS</Text>
+                    
+                    <Text style={styles.label}>Event Name</Text>
+                    <TextInput style={styles.input} value={event} onChangeText={setEvent} placeholder="e.g. Club Championship"/>
+                    
+                    <View style={{flexDirection: 'row', gap: 12}}>
+                        <View style={{flex: 1}}>
+                            <Text style={styles.label}>Round</Text>
+                            <TextInput style={styles.input} value={round} onChangeText={setRound} placeholder="e.g. SF"/>
                         </View>
-                        
-                        <Text style={styles.label}>Final Score</Text>
-                        <TextInput style={styles.input} value={score} onChangeText={setScore} placeholder="e.g. 6-4, 6-2"/>
-                        
-                        <Text style={styles.label}>Reflection</Text>
-                        <TextInput 
-                            style={[styles.input, styles.textArea]} 
-                            value={reflection} 
-                            onChangeText={setReflection} 
-                            multiline 
-                            placeholder="What worked? What didn't?"
+                        <View style={{flex: 1}}>
+                            <Text style={styles.label}>Opponent</Text>
+                            <TextInput style={styles.input} value={opponent} onChangeText={setOpponent} placeholder="Name"/>
+                        </View>
+                    </View>
+                </View>
+
+                {/* --- GAME PLAN --- */}
+                <View style={[styles.sectionContainer, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD' }]}>
+                    <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                        <Text style={[styles.sectionHeader, {color: '#0369A1'}]}>GAME PLAN / TACTICS</Text>
+                        <Edit3 size={16} color="#0369A1"/>
+                    </View>
+                    <TextInput 
+                        style={[styles.input, styles.textArea, {backgroundColor: '#FFF', borderColor: '#E0F2FE'}]} 
+                        value={tactics} 
+                        onChangeText={setTactics} 
+                        multiline 
+                        placeholder="Key focus areas, opponent weaknesses..."
+                    />
+                </View>
+
+                {/* --- POST-MATCH --- */}
+                <View style={[styles.sectionContainer, isComplete ? {backgroundColor: '#F0FDF4', borderColor: '#BBF7D0'} : {}]}>
+                    <View style={{flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom: 12}}>
+                        <Text style={[styles.sectionHeader, isComplete ? {color: '#15803D'} : {}]}>POST-MATCH RESULT</Text>
+                        <Switch 
+                            value={isComplete} 
+                            onValueChange={setIsComplete} 
+                            trackColor={{false: '#E2E8F0', true: '#16A34A'}}
                         />
-                    </>
-                )}
+                    </View>
+                    
+                    {isComplete && (
+                        <View>
+                            <View style={{flexDirection: 'row', gap: 12}}>
+                                <View style={{flex: 1}}>
+                                    <Text style={styles.label}>Outcome</Text>
+                                    <View style={{flexDirection:'row', borderRadius: 8, overflow:'hidden', borderWidth: 1, borderColor: '#CBD5E1'}}>
+                                        {['Win', 'Loss'].map((r) => (
+                                            <TouchableOpacity 
+                                                key={r} 
+                                                style={[styles.resultToggle, result === r && (r === 'Win' ? styles.winBg : styles.lossBg)]}
+                                                onPress={() => setResult(r)}
+                                            >
+                                                <Text style={[styles.resultToggleText, result === r && {color: '#FFF'}]}>{r}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                                <View style={{flex: 1}}>
+                                    <Text style={styles.label}>Score</Text>
+                                    <TextInput style={[styles.input, {backgroundColor:'#FFF'}]} value={score} onChangeText={setScore} placeholder="6-4, 6-2"/>
+                                </View>
+                            </View>
+                            
+                            <Text style={styles.label}>Reflection</Text>
+                            <TextInput 
+                                style={[styles.input, styles.textArea, {backgroundColor: '#FFF'}]} 
+                                value={reflection} 
+                                onChangeText={setReflection} 
+                                multiline 
+                                placeholder="Debrief notes..."
+                            />
+                        </View>
+                    )}
+                    {!isComplete && (
+                        <Text style={{color: '#94A3B8', fontStyle: 'italic', fontSize: 12}}>Enable to log scores and reflection.</Text>
+                    )}
+                </View>
 
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
                     <Text style={styles.saveBtnText}>Save Entry</Text>
@@ -241,7 +373,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  headerSub: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
   backBtn: { padding: 4 },
+  addIconBtn: { padding: 4 },
   
   tabRow: { flexDirection: 'row', paddingHorizontal: 16, borderBottomWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#FFF' },
   tab: { paddingVertical: 12, marginRight: 24, borderBottomWidth: 2, borderColor: 'transparent' },
@@ -251,35 +385,46 @@ const styles = StyleSheet.create({
 
   list: { padding: 16 },
   card: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, ...SHADOWS.small },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  date: { fontSize: 12, color: '#94A3B8' },
-  round: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  date: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  round: { fontSize: 11, fontWeight: '800', color: '#64748B', textTransform: 'uppercase', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   
-  versusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  meText: { fontWeight: '700', color: '#0F172A' },
-  vsText: { color: '#94A3B8', fontSize: 12 },
-  oppText: { fontWeight: '700', color: '#EF4444' },
-  eventName: { fontSize: 13, color: '#64748B', marginBottom: 12 },
+  versusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  eventName: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
+  vsText: { color: '#CBD5E1' },
+  oppText: { fontSize: 14, color: '#334155' },
 
-  tacticsPreview: { flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: '#F1F5F9', padding: 8, borderRadius: 6 },
-  tacticsText: { fontSize: 12, color: '#475569', fontStyle: 'italic' },
+  tacticsPreview: { flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8 },
+  tacticsText: { fontSize: 12, color: '#64748B', fontStyle: 'italic' },
   
-  resultBadge: { flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: '#10B981', padding: 8, borderRadius: 6, alignSelf: 'flex-start' },
-  resultText: { color: '#FFF', fontWeight: '700', fontSize: 12 },
-
-  fab: { position: 'absolute', bottom: 32, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', ...SHADOWS.medium },
+  resultBadge: { flexDirection: 'row', gap: 6, alignItems: 'center', padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
+  winBadge: { backgroundColor: '#DCFCE7' },
+  lossBadge: { backgroundColor: '#FEE2E2' },
+  resultText: { fontWeight: '700', fontSize: 12 },
 
   modalContent: { flex: 1, backgroundColor: '#FFF', paddingTop: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
   modalTitle: { fontSize: 20, fontWeight: '800' },
-  label: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 12, fontSize: 16 },
-  textArea: { height: 100, textAlignVertical: 'top' },
-  divider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 20 },
-  sectionHeader: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  sectionBadge: { alignSelf:'flex-start', backgroundColor: '#E0F2FE', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginBottom: 4 },
-  sectionBadgeText: { fontSize: 10, fontWeight: '800', color: '#0284C7' },
-  saveBtn: { backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 32 },
+  
+  sectionContainer: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16, marginBottom: 16 },
+  sectionHeader: { fontSize: 11, fontWeight: '800', color: '#94A3B8', marginBottom: 12, letterSpacing: 0.5 },
+
+  // Athlete Selector Styles
+  athleteSelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  athleteChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  athleteChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  athleteChipText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
+
+  label: { fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 6, marginTop: 4 },
+  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 12, fontSize: 15, color: '#0F172A' },
+  textArea: { height: 80, textAlignVertical: 'top' },
+
+  resultToggle: { flex: 1, padding: 12, alignItems: 'center', backgroundColor: '#F1F5F9' },
+  winBg: { backgroundColor: '#16A34A' },
+  lossBg: { backgroundColor: '#DC2626' },
+  resultToggleText: { fontWeight: '700', color: '#64748B', fontSize: 12 },
+
+  saveBtn: { backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 12, marginBottom: 40 },
   saveBtnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
   emptyText: { textAlign: 'center', color: '#94A3B8', marginTop: 40 }
 });

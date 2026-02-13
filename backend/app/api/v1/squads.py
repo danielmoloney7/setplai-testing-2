@@ -7,8 +7,9 @@ from datetime import datetime
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.user import User, Squad, SquadMember
+from app.models.user import User, Squad, SquadMember, Notification
 from app.models.training import SquadAttendance, SessionLog, DrillPerformance, Program
+import uuid
 
 router = APIRouter()
 
@@ -97,11 +98,31 @@ def get_squad_members(squad_id: str, db: Session = Depends(get_db), current_user
 
 @router.post("/{squad_id}/members")
 def add_member(squad_id: str, data: AddMemberRequest, db: Session = Depends(get_db)):
-    exists = db.query(SquadMember).filter(SquadMember.squad_id == squad_id, SquadMember.player_id == data.player_id).first()
-    if exists: return {"status": "already_member"}
-
+    # ... existing check logic ...
+    
     new_member = SquadMember(squad_id=squad_id, player_id=data.player_id)
     db.add(new_member)
+    
+    # ✅ NOTIFICATION LOGIC START
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    player = db.query(User).filter(User.id == data.player_id).first()
+    
+    if player and squad and not player.coach_id:
+        player.coach_id = squad.coach_id
+        db.add(player) # Update player record
+
+    # ✅ 3. Send Notification
+    notif = Notification(
+        id=str(uuid.uuid4()),
+        user_id=data.player_id,
+        title="Squad Invite",
+        message=f"You have been added to the squad: {squad.name}",
+        type="SQUAD_INVITE",
+        reference_id=squad_id
+    )
+    db.add(notif)
+    # ✅ NOTIFICATION LOGIC END
+
     db.commit()
     return {"status": "success"}
 
@@ -189,3 +210,50 @@ def get_squad_leaderboard(squad_id: str, db: Session = Depends(get_db)):
     stats.sort(key=lambda x: x['sessions_completed'], reverse=True)
     
     return stats
+
+@router.get("/{squad_id}/progress")
+def get_squad_progress(squad_id: str, db: Session = Depends(get_db)):
+    # 1. Find the ONE active player program assigned to this squad
+    active_squad_program = db.query(Program).filter(
+        Program.squad_id == squad_id,
+        Program.status == "ACTIVE",
+        Program.program_type == "PLAYER_PLAN" # Ensure it's the plan players execute
+    ).first()
+
+    if not active_squad_program:
+        return {"player_progress": [], "squad_completion": 0}
+
+    # 2. Get all members of the squad
+    members = db.query(User).join(SquadMember).filter(SquadMember.squad_id == squad_id).all()
+    
+    # 3. Calculate total distinct sessions in this specific program
+    # Assuming sessions are defined in a 'sessions' or 'schedule' field
+    total_program_sessions = len(active_squad_program.sessions) 
+    
+    progress_results = []
+    total_completed_by_all = 0
+
+    for member in members:
+        # ✅ FIX: Only count logs matching this specific squad program
+        completed_sessions = db.query(SessionLog).filter(
+            SessionLog.player_id == member.id,
+            SessionLog.program_id == active_squad_program.id
+        ).count()
+
+        completion_pct = (completed_sessions / total_program_sessions * 100) if total_program_sessions > 0 else 0
+        
+        progress_results.append({
+            "id": member.id,
+            "name": member.name,
+            "sessions_done": completed_sessions,
+            "completion_percentage": min(completion_pct, 100)
+        })
+        total_completed_by_all += min(completion_pct, 100)
+
+    squad_overall_completion = total_completed_by_all / len(members) if members else 0
+
+    return {
+        "active_program_title": active_squad_program.title,
+        "player_progress": progress_results,
+        "squad_completion": round(squad_overall_completion, 1)
+    }

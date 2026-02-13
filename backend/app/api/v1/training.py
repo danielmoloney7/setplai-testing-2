@@ -6,9 +6,10 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from app.core.database import get_db
-from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id
-from app.models.user import User, SquadMember
+from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id, MatchEntry
+from app.models.user import User, SquadMember, Notification
 from app.core.security import get_current_user
+import uuid
 
 
 router = APIRouter()
@@ -300,6 +301,16 @@ def create_program(
                     assigned_at=datetime.utcnow()
                 )
                 db.add(assignment)
+                if str(player_id) != str(current_user.id):
+                    notif = Notification(
+                        id=str(uuid.uuid4()),
+                        user_id=str(player_id),
+                        title="New Program Assigned",
+                        message=f"Coach assigned you a new program: {program_in.title}",
+                        type="PROGRAM_INVITE",
+                        reference_id=new_program.id
+                    )
+                    db.add(notif)
         else:
             print("   -> SQUAD_SESSION: Skipping assignments (Coach Only)")
 
@@ -445,36 +456,46 @@ def get_player_logs(
     return enrich_logs_with_names(logs, db)
 
 @router.get("/coach/activity")
-def get_coach_activity(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != "COACH":
-        return []
+def get_coach_activity(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Get all athletes linked to coach
+    athlete_ids = [u.id for u in db.query(User).filter(User.coach_id == current_user.id).all()]
+    # Get all athletes in coach's squads
+    squad_ids = [s.id for s in db.query(Squad).filter(Squad.coach_id == current_user.id).all()]
+    squad_athlete_ids = [m.player_id for m in db.query(SquadMember).filter(SquadMember.squad_id.in_(squad_ids)).all()]
     
-    players = db.query(User).filter(User.coach_id == current_user.id).all()
-    player_ids = [p.id for p in players]
-    
-    if not player_ids:
-        return []
+    all_ids = list(set(athlete_ids + squad_athlete_ids))
 
-    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
+    # ✅ Fetch BOTH SessionLogs and MatchEntries
+    logs = db.query(SessionLog).filter(SessionLog.player_id.in_(all_ids)).order_by(SessionLog.completed_at.desc()).limit(10).all()
+    matches = db.query(MatchEntry).filter(MatchEntry.user_id.in_(all_ids)).order_by(MatchEntry.date.desc()).limit(10).all()
+
+    # Combine and sort by date
+    combined_activity = []
     
-    # Enrich with Drill Names first
-    enriched_logs = enrich_logs_with_names(logs, db)
-    
-    # Add Player Names (Need to return dicts, not Pydantic models here since schema doesn't have player_name)
-    results = []
-    for log_model, original_log in zip(enriched_logs, logs):
-        player = next((p for p in players if p.id == original_log.player_id), None)
-        player_name = player.name if player else "Unknown Athlete"
+    for l in logs:
+        combined_activity.append({
+            "id": l.id,
+            "type": "SESSION",
+            "player_name": db.query(User.name).filter(User.id == l.player_id).scalar(),
+            "date": l.completed_at,
+            "title": "Completed Training"
+        })
         
-        # Convert back to dict to add extra field
-        log_dict = log_model.model_dump()
-        log_dict['player_name'] = player_name
-        results.append(log_dict)
+    for m in matches:
+        combined_activity.append({
+            "id": m.id,
+            "type": "MATCH",
+            "player_name": db.query(User.name).filter(User.id == m.user_id).scalar(),
+            "opponent_name": m.opponent_name,
+            "event_name": m.event_name,
+            "date": m.date,
+            "score": m.score,
+            "result": m.result
+        })
 
-    return results
+    # Sort descending
+    combined_activity.sort(key=lambda x: x['date'], reverse=True)
+    return combined_activity[:15]
 
 @router.post("/drills")
 def create_drill(

@@ -65,8 +65,12 @@ class Notification(Base):
     user_id = Column(String, ForeignKey("users.id"))
     title = Column(String(255))
     message = Column(String(500))
-    type = Column(String(50)) # 'PROGRAM_INVITE', 'SQUAD_INVITE', 'MATCH_LOG'
+    type = Column(String(50)) 
     reference_id = Column(String(255), nullable=True) 
+    
+    # ✅ THIS WAS MISSING
+    related_user_id = Column(String, nullable=True)
+
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

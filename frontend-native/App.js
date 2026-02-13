@@ -17,6 +17,8 @@ import SquadDetailScreen from './src/screens/SquadDetailScreen';
 import SessionLogDetailScreen from './src/screens/SessionLogDetailScreen';
 import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
 import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
+import MatchListScreen from './src/screens/MatchListScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -121,6 +123,16 @@ export default function App() {
           name="MatchDiary" 
           component={MatchDiaryScreen} 
           options={{ presentation: 'modal' }} // Optional: Makes it slide up like a card
+        />
+
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen} 
+        />
+
+        <Stack.Screen 
+          name="MatchList" 
+          component={MatchListScreen} 
         />
 
       </Stack.Navigator>
