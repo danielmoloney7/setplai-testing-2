@@ -83,9 +83,10 @@ export const fetchMyHistory = async () => {
 
 // --- USER & PROFILE ---
 
-export const updateProfile = async (goals) => {
+export const updateProfile = async (data) => {
   try {
-    const response = await api.put('/my-profile', { goals });
+    // Expects data = { goals: [...], level: "Advanced" }
+    const response = await api.put('/my-profile', data);
     return response.data;
   } catch (error) {
     console.error("Error updating profile:", error);
@@ -121,6 +122,17 @@ export const createProgram = async (programData) => {
     return response.data;
   } catch (error) {
     console.error("Create Program Error:", error);
+    throw error;
+  }
+};
+
+export const deleteProgram = async (programId) => {
+  try {
+    // Note: URL matches backend router prefix in main.py (/api/v1 -> training router)
+    const response = await api.delete(`/programs/${programId}`);
+    return response.data;
+  } catch (error) {
+    console.error("Delete Program Error:", error);
     throw error;
   }
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TextInput, ScrollView, 
   TouchableOpacity, Alert, ActivityIndicator, Platform, KeyboardAvoidingView
@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CommonActions } from '@react-navigation/native'; 
 import { 
   ChevronLeft, Check, Users, User, ChevronRight, 
-  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit, X // ✅ Import X
+  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit, X 
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
@@ -190,14 +190,15 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     setEditingSessionIndex(null);
   };
 
-  // ✅ CRITICAL: Correctly flag Squad Sessions
+  // ✅ CRITICAL: Correctly flag Squad Sessions & Fix Navigation
   const handleFinalize = async (targets) => {
     setLoading(true);
     try {
-        // If we are in "Squad Mode", it's a coach-only session.
-        // If not, it's a player plan (assigned to people).
         const isSquadSession = squadMode === true;
-
+        
+        // Auto-detect Squad ID from targets if not explicit
+        const explicitSquadId = targets.find(tId => squads.some(sq => sq.id === tId));
+        
         const payload = {
             title: draftProgram.title,
             description: draftProgram.description || "",
@@ -206,7 +207,9 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             
             // ✅ Send Flags to Backend
             program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
-            squad_id: isSquadSession && targets.length > 0 ? targets[0] : null,
+            squad_id: isSquadSession 
+                ? (targets.length > 0 ? targets[0] : null) 
+                : (explicitSquadId || null),
 
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
@@ -231,10 +234,11 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         await createProgram(payload);
         setLoading(false);
         
-        // Navigate back intelligently
+        // ✅ NAVIGATION FIX IS HERE
         if (isSquadSession) {
-            // Go back to the squad screen
-             navigation.navigate('SquadDetail', { squad: { id: targets[0] } });
+             // REPLACE the current screen (Builder) with SquadDetail.
+             // This removes Builder from the history stack.
+             navigation.replace('SquadDetail', { squad: { id: targets[0] } });
         } else {
             const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
             navigation.dispatch(
@@ -245,13 +249,10 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             );
         }
         
-        setTimeout(() => {
-            // Alert.alert("Success", isSquadSession ? "Squad Session Created!" : "Program Assigned!");
-        }, 500);
-
     } catch (e) {
         console.error("Save Error:", e);
         setLoading(false);
+        Alert.alert("Error", "Could not save program.");
     }
   };
 
@@ -276,7 +277,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
       
-      {/* ✅ FIX: Hide Create Manually for Players */}
       {userRole !== 'PLAYER' && (
         <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
             <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
@@ -464,7 +464,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn}><ChevronLeft size={24} color="#0F172A" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Builder</Text>
-        {/* ✅ FIX: Add X Button for instant close */}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><X size={24} color="#64748B" /></TouchableOpacity> 
       </View>
       <View style={styles.content}>

@@ -3,9 +3,9 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check } from 'lucide-react-native';
+import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchSessionLogs, updateProgramStatus } from '../services/api';
+import { fetchSessionLogs, updateProgramStatus, deleteProgram } from '../services/api';
 
 export default function ProgramDetailScreen({ navigation, route }) {
   const { program } = route.params || {};
@@ -74,6 +74,28 @@ export default function ProgramDetailScreen({ navigation, route }) {
       }
   };
 
+  const handleDelete = () => {
+    Alert.alert(
+      "Delete Program",
+      "Are you sure you want to remove this program?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: async () => {
+            try {
+              await deleteProgram(program.id);
+              navigation.goBack();
+            } catch (e) {
+              Alert.alert("Error", "Could not delete program.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.headerRow}>
@@ -81,6 +103,9 @@ export default function ProgramDetailScreen({ navigation, route }) {
               <ChevronLeft size={24} color="#334155" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Program Details</Text>
+          <TouchableOpacity onPress={handleDelete} style={{padding: 4}}>
+              <Trash2 size={24} color="#EF4444" />
+          </TouchableOpacity>
           <View style={{width: 24}} />
       </View>
 

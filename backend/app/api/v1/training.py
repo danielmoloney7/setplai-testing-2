@@ -90,6 +90,7 @@ class UserResponse(BaseModel):
 
 class UserUpdateSchema(BaseModel):
     goals: List[str]
+    level: Optional[str] = None
 
 class DrillCreate(BaseModel):
     name: str
@@ -371,6 +372,34 @@ def create_program(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
+@router.delete("/programs/{program_id}")
+def delete_program(
+    program_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Try to find the program
+    program = db.query(Program).filter(Program.id == program_id).first()
+    
+    # Case A: User is the Coach/Creator -> Archive it
+    if program and program.creator_id == current_user.id:
+        program.status = "ARCHIVED"
+        db.commit()
+        return {"status": "success", "message": "Program archived"}
+
+    # Case B: User is a Player assigned to it -> Remove Assignment
+    assignment = db.query(ProgramAssignment).filter(
+        ProgramAssignment.program_id == program_id,
+        ProgramAssignment.player_id == current_user.id
+    ).first()
+
+    if assignment:
+        db.delete(assignment)
+        db.commit()
+        return {"status": "success", "message": "Removed from your plans"}
+
+    raise HTTPException(status_code=403, detail="Not authorized to delete this program")
+
 @router.get("/my-active-program")
 def get_my_active_program(
     current_user: User = Depends(get_current_user),
@@ -504,10 +533,23 @@ def update_session_feedback(
     return session
 
 @router.put("/my-profile")
-def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    current_user.goals = ",".join(profile_data.goals) 
+def update_my_profile(
+    profile_data: UserUpdateSchema, 
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    current_user.goals = ",".join(profile_data.goals)
+    
+    # ✅ Update Level if provided
+    if profile_data.level:
+        current_user.level = profile_data.level
+        
     db.commit()
-    return {"status": "success", "goals": current_user.goals}
+    return {
+        "status": "success", 
+        "goals": current_user.goals, 
+        "level": current_user.level
+    }
 
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):

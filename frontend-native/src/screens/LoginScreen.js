@@ -16,6 +16,7 @@ export default function LoginScreen({ navigation }) {
   // ✅ Scroll Refs
   const scrollRef = useRef(null);
   const inputCoords = useRef({});
+  const passwordRef = useRef(null); // ✅ Ref Created
 
   const scrollToInput = (fieldKey) => {
     const y = inputCoords.current[fieldKey];
@@ -88,6 +89,10 @@ export default function LoginScreen({ navigation }) {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 onFocus={() => scrollToInput('email')}
+                returnKeyType="next" 
+                // ✅ When "Next" is pressed, jump to passwordRef
+                onSubmitEditing={() => passwordRef.current?.focus()} 
+                blurOnSubmit={false}
               />
             </View>
 
@@ -97,6 +102,7 @@ export default function LoginScreen({ navigation }) {
             >
               <Text style={styles.label}>Password</Text>
               <TextInput 
+                ref={passwordRef} // ✅ FIX: Attach the Ref here!
                 style={styles.input} 
                 placeholder="••••••••"
                 placeholderTextColor="#94A3B8"
@@ -104,6 +110,8 @@ export default function LoginScreen({ navigation }) {
                 onChangeText={setPassword}
                 secureTextEntry
                 onFocus={() => scrollToInput('password')}
+                returnKeyType="done" 
+                onSubmitEditing={handleLogin} 
               />
             </View>
             
@@ -137,7 +145,7 @@ export default function LoginScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 150 }, // ✅ Extra padding
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 150 }, 
   header: { alignItems: 'center', marginBottom: 40 },
   logoText: { fontSize: 40, fontWeight: '800', color: COLORS.primary, letterSpacing: -1, marginBottom: 8 },
   subtitle: { fontSize: 16, color: COLORS.textMuted },
