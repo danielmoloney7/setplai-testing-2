@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CommonActions } from '@react-navigation/native'; 
 import { 
   ChevronLeft, Check, Users, User, ChevronRight, 
-  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit
+  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit, X // ✅ Import X
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
@@ -246,13 +246,12 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         }
         
         setTimeout(() => {
-            Alert.alert("Success", isSquadSession ? "Squad Session Created!" : "Program Assigned!");
+            // Alert.alert("Success", isSquadSession ? "Squad Session Created!" : "Program Assigned!");
         }, 500);
 
     } catch (e) {
         console.error("Save Error:", e);
         setLoading(false);
-        Alert.alert("Error", "Could not save program.");
     }
   };
 
@@ -277,12 +276,15 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
       
-      <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
-        <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
-        <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch.</Text></View>
-        <ChevronRight size={20} color="#CBD5E1" />
-      </TouchableOpacity>
-
+      {/* ✅ FIX: Hide Create Manually for Players */}
+      {userRole !== 'PLAYER' && (
+        <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
+            <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
+            <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch.</Text></View>
+            <ChevronRight size={20} color="#CBD5E1" />
+        </TouchableOpacity>
+      )}  
+    
       <TouchableOpacity style={styles.methodCard} onPress={() => { setCreationMethod('LIBRARY'); setStep(1); }}>
         <View style={[styles.iconBox, { backgroundColor: '#DBEAFE' }]}><Layers size={28} color="#2563EB" /></View>
         <View style={{flex: 1}}><Text style={styles.cardTitle}>Templates</Text><Text style={styles.cardDesc}>Choose pre-made plans.</Text></View>
@@ -461,7 +463,9 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn}><ChevronLeft size={24} color="#0F172A" /></TouchableOpacity>
-        <Text style={styles.headerTitle}>Builder</Text><View style={{width: 24}} /> 
+        <Text style={styles.headerTitle}>Builder</Text>
+        {/* ✅ FIX: Add X Button for instant close */}
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><X size={24} color="#64748B" /></TouchableOpacity> 
       </View>
       <View style={styles.content}>
         {step === 0 && renderStep0()}

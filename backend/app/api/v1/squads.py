@@ -128,10 +128,30 @@ def add_member(squad_id: str, data: AddMemberRequest, db: Session = Depends(get_
 
 @router.delete("/{squad_id}/members/{player_id}")
 def remove_member(squad_id: str, player_id: str, db: Session = Depends(get_db)):
+    # 1. Find Member
     member = db.query(SquadMember).filter(SquadMember.squad_id == squad_id, SquadMember.player_id == player_id).first()
+    
     if member:
+        # 2. Get Squad Details for Notification (Before deleting)
+        squad = db.query(Squad).filter(Squad.id == squad_id).first()
+        squad_name = squad.name if squad else "Team"
+
+        # 3. Delete Member
         db.delete(member)
+        
+        # 4. ✅ Create Notification
+        notif = Notification(
+            id=str(uuid.uuid4()),
+            user_id=player_id,
+            title="Squad Update",
+            message=f"You have been removed from {squad_name}.",
+            type="SQUAD_REMOVE",
+            reference_id=squad_id
+        )
+        db.add(notif)
+        
         db.commit()
+        
     return {"status": "removed"}
 
 @router.post("/{squad_id}/attendance")

@@ -8,11 +8,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronLeft, Plus, Trophy, Edit3, X, Calendar, ClipboardList, User, Search, Check } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchMatches, createMatchLog, updateMatchDetails, fetchMyTeam } from '../services/api'; // ✅ Added fetchMyTeam
+import { fetchMatches, createMatchLog, updateMatchDetails, fetchMyTeam } from '../services/api';
 
 export default function MatchDiaryScreen({ navigation, route }) {
-  // If navigated from a Player Profile, userId is pre-filled.
-  // If navigated from Coach Dashboard, userId might be null initially.
   const { userId: paramUserId, userName: paramUserName } = route.params || {};
   
   const [matches, setMatches] = useState([]);
@@ -22,9 +20,12 @@ export default function MatchDiaryScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState('PLAYER');
   
+  // ✅ NEW: Main Search State
+  const [searchQuery, setSearchQuery] = useState('');
+
   // ✅ COACHING STATE
   const [myAthletes, setMyAthletes] = useState([]);
-  const [selectedAthlete, setSelectedAthlete] = useState(null); // { id, name }
+  const [selectedAthlete, setSelectedAthlete] = useState(null); 
   const [athleteSearch, setAthleteSearch] = useState('');
 
   // Form State
@@ -46,13 +47,11 @@ export default function MatchDiaryScreen({ navigation, route }) {
           const safeRole = userRole?.toUpperCase() || 'PLAYER';
           setRole(safeRole);
 
-          // If Coach, load team list for the picker
           if (safeRole === 'COACH') {
               const team = await fetchMyTeam();
               setMyAthletes(team);
           }
           
-          // Pre-select athlete if passed via params
           if (paramUserId) {
               setSelectedAthlete({ id: paramUserId, name: paramUserName || 'Athlete' });
           }
@@ -64,22 +63,17 @@ export default function MatchDiaryScreen({ navigation, route }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      // If Coach & No Athlete Selected -> fetch ALL or empty? Let's fetch selected or empty.
       const targetId = selectedAthlete?.id || paramUserId || null;
-      
-      // If Coach and no target selected yet, maybe don't fetch anything or fetch all?
-      // For now, let's fetch matches for the *selected* context.
       const data = await fetchMatches(targetId); 
       setMatches(data);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
-  useFocusEffect(useCallback(() => { loadData(); }, [selectedAthlete])); // Reload when athlete changes
+  useFocusEffect(useCallback(() => { loadData(); }, [selectedAthlete]));
 
   // --- SAVE HANDLER ---
   const handleSave = async () => {
-    // ✅ 1. VALIDATION: Coach MUST select a player
     if (role === 'COACH' && !selectedAthlete?.id) {
         Alert.alert("Select Athlete", "Please tag the player this match belongs to.");
         return;
@@ -96,7 +90,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
         opponent_name: opponent,
         round: round, 
         tactics: tactics,
-        player_id: selectedAthlete?.id || null, // ✅ Send Player ID so they get notified
+        player_id: selectedAthlete?.id || null,
         score: isComplete ? score : null,
         result: isComplete ? result : 'Scheduled',
         reflection: isComplete ? reflection : null,
@@ -127,7 +121,6 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setRound(match.round || ''); 
     setTactics(match.tactics || '');
     
-    // Set Athlete Context for Edit (if coach is editing a specific match)
     if (role === 'COACH' && match.user_id) {
         const found = myAthletes.find(a => a.id === match.user_id);
         if (found) setSelectedAthlete(found);
@@ -152,16 +145,31 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setScore('');
     setResult('Win');
     setReflection('');
-    // Don't reset selectedAthlete if it was passed via params (locked context)
     if (!paramUserId) setSelectedAthlete(null);
+    setAthleteSearch(''); // Reset search
   };
 
+  // ✅ UPDATED: Filter Logic (Tabs + Search)
   const filteredMatches = matches.filter(m => {
+    // 1. Tab Filter
     const isFinished = m.score || (m.result && m.result !== 'Scheduled');
-    return activeTab === 'PAST' ? isFinished : !isFinished;
+    const matchesTab = activeTab === 'PAST' ? isFinished : !isFinished;
+    if (!matchesTab) return false;
+
+    // 2. Search Filter
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const opp = m.opponent_name?.toLowerCase() || '';
+    const evt = m.event_name?.toLowerCase() || '';
+    const rnd = m.round?.toLowerCase() || '';
+    return opp.includes(q) || evt.includes(q) || rnd.includes(q);
   });
 
-  // --- RENDER HELPERS ---
+  // ✅ NEW: Filter Athletes for Modal
+  const filteredAthletes = myAthletes.filter(a => 
+      a.name.toLowerCase().includes(athleteSearch.toLowerCase())
+  );
+
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => openEdit(item)}>
       <View style={styles.cardHeader}>
@@ -211,6 +219,24 @@ export default function MatchDiaryScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
+      {/* ✅ NEW: MAIN SEARCH BAR */}
+      <View style={styles.searchContainer}>
+          <Search size={20} color="#94A3B8" style={{marginRight: 8}} />
+          <TextInput 
+              style={styles.searchInput}
+              placeholder="Search opponent, event..."
+              placeholderTextColor="#94A3B8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <X size={20} color="#94A3B8" />
+              </TouchableOpacity>
+          )}
+      </View>
+
       <View style={styles.tabRow}>
           <TouchableOpacity onPress={() => setActiveTab('UPCOMING')} style={[styles.tab, activeTab === 'UPCOMING' && styles.activeTab]}>
               <Text style={[styles.tabText, activeTab === 'UPCOMING' && styles.activeTabText]}>Upcoming</Text>
@@ -233,7 +259,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
                     <Text style={styles.emptyText}>
                         {role === 'COACH' && !selectedAthlete 
                             ? "Select a player to view their matches." 
-                            : "No matches found."}
+                            : (searchQuery ? "No matches match your search." : "No matches found.")}
                     </Text>
                 </View>
             }
@@ -253,12 +279,24 @@ export default function MatchDiaryScreen({ navigation, route }) {
             
             <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 50}}>
                 
-                {/* ✅ COACH: PLAYER SELECTOR */}
+                {/* ✅ COACH: PLAYER SELECTOR WITH SEARCH */}
                 {role === 'COACH' && !editingMatch && (
                     <View style={styles.sectionContainer}>
                         <Text style={styles.sectionHeader}>ASSIGN TO PLAYER</Text>
+                        
+                        {/* Athlete Search Input */}
+                        <View style={styles.miniSearch}>
+                            <Search size={16} color="#94A3B8" />
+                            <TextInput 
+                                style={{flex: 1, fontSize: 13, color: '#0F172A', paddingVertical: 4}}
+                                placeholder="Filter players..."
+                                value={athleteSearch}
+                                onChangeText={setAthleteSearch}
+                            />
+                        </View>
+
                         <View style={styles.athleteSelector}>
-                            {myAthletes.map(athlete => (
+                            {filteredAthletes.map(athlete => (
                                 <TouchableOpacity 
                                     key={athlete.id}
                                     style={[styles.athleteChip, selectedAthlete?.id === athlete.id && styles.athleteChipActive]}
@@ -271,6 +309,9 @@ export default function MatchDiaryScreen({ navigation, route }) {
                                     {selectedAthlete?.id === athlete.id && <Check size={14} color="#FFF" style={{marginLeft:4}}/>}
                                 </TouchableOpacity>
                             ))}
+                            {filteredAthletes.length === 0 && (
+                                <Text style={{fontSize: 12, color: '#94A3B8', fontStyle: 'italic'}}>No players found.</Text>
+                            )}
                         </View>
                     </View>
                 )}
@@ -376,6 +417,34 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
   backBtn: { padding: 4 },
   addIconBtn: { padding: 4 },
+
+  // ✅ NEW SEARCH STYLES
+  searchContainer: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      backgroundColor: '#FFF', 
+      marginHorizontal: 16, 
+      marginTop: 8,
+      marginBottom: 8, 
+      paddingHorizontal: 12, 
+      paddingVertical: 10, 
+      borderRadius: 12, 
+      borderWidth: 1, 
+      borderColor: '#E2E8F0', 
+      ...SHADOWS.small 
+  },
+  searchInput: { flex: 1, fontSize: 15, color: '#0F172A' },
+  miniSearch: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#F8FAFC',
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      marginBottom: 12,
+      gap: 8
+  },
   
   tabRow: { flexDirection: 'row', paddingHorizontal: 16, borderBottomWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#FFF' },
   tab: { paddingVertical: 12, marginRight: 24, borderBottomWidth: 2, borderColor: 'transparent' },

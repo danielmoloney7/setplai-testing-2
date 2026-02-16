@@ -65,8 +65,13 @@ export default function ProgramDetailScreen({ navigation, route }) {
   const sessionList = Object.values(groupedSessions || {});
 
   const handleReturn = () => {
-      const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
-      navigation.navigate('Main', { screen: targetTab });
+      if (navigation.canGoBack()) {
+          navigation.goBack();
+      } else {
+          // Fallback if opened directly (e.g., from deep link)
+          const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
+          navigation.navigate('Main', { screen: targetTab });
+      }
   };
 
   return (

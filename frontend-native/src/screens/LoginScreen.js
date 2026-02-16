@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, SafeAreaView, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { 
+  View, Text, TextInput, StyleSheet, Alert, SafeAreaView, 
+  KeyboardAvoidingView, Platform, ScrollView 
+} from 'react-native';
 import api from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Button from '../components/Button'; 
@@ -10,107 +13,122 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // ✅ Scroll Refs
+  const scrollRef = useRef(null);
+  const inputCoords = useRef({});
+
+  const scrollToInput = (fieldKey) => {
+    const y = inputCoords.current[fieldKey];
+    if (y !== undefined && scrollRef.current) {
+      scrollRef.current.scrollTo({ y: y, animated: true });
+    }
+  };
+
   const handleLogin = async () => {
-    console.log("Login Button Pressed!");
     setLoading(true);
     try {
-      console.log(`Attempting login to: ${api.defaults.baseURL}`);
-      
-      // 1. Prepare Form Data for OAuth2
       const formData = new URLSearchParams();
       formData.append('username', email.toLowerCase()); 
       formData.append('password', password);
 
-      // 2. Call API
       const response = await api.post('/auth/token', formData.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      // 3. Extract Data
       const { access_token, role, name } = response.data;
-
-      // --- FIX STARTS HERE ---
-      // 4. Normalize Role (Handle missing role + force Uppercase)
-      // If backend sends null, check email. If backend sends "coach", make it "COACH".
       const rawRole = role || (email.toLowerCase().includes('coach') ? 'COACH' : 'PLAYER');
       const normalizedRole = rawRole.toUpperCase(); 
-      // --- FIX ENDS HERE ---
 
-      // 5. Save Data
       await AsyncStorage.setItem('access_token', access_token);
       await AsyncStorage.setItem('user_role', normalizedRole); 
       await AsyncStorage.setItem('user_name', name || email.split('@')[0]);
       
-      // 6. Navigate to Dashboard
       navigation.replace('Main'); 
 
     } catch (error) {
-      console.log("Login Error:", error);
       Alert.alert("Login Failed", "Please check your email and password.");
     } finally {
       setLoading(false);
     }
   };
 
-
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.content}>
-        
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.logoText}>setplai</Text>
-          <Text style={styles.subtitle}>Coach & Player Login</Text>
-        </View>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+        style={styles.content}
+      >
+        <ScrollView 
+          ref={scrollRef}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.logoText}>setplai</Text>
+            <Text style={styles.subtitle}>Coach & Player Login</Text>
+          </View>
 
-        {/* Form */}
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="coach@gmail.com"
-              placeholderTextColor="#94A3B8"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
+          {/* Form */}
+          <View style={styles.form}>
+            
+            <View 
+              style={styles.inputGroup} 
+              onLayout={(e) => inputCoords.current['email'] = e.nativeEvent.layout.y}
+            >
+              <Text style={styles.label}>Email</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="coach@gmail.com"
+                placeholderTextColor="#94A3B8"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                onFocus={() => scrollToInput('email')}
+              />
+            </View>
+
+            <View 
+              style={styles.inputGroup}
+              onLayout={(e) => inputCoords.current['password'] = e.nativeEvent.layout.y}
+            >
+              <Text style={styles.label}>Password</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="••••••••"
+                placeholderTextColor="#94A3B8"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                onFocus={() => scrollToInput('password')}
+              />
+            </View>
+            
+            <View style={styles.spacer} />
+
+            <Button 
+              title="Log In" 
+              onPress={handleLogin} 
+              isLoading={loading} 
+              fullWidth 
+            />
+            
+            <View style={styles.divider}>
+               <Text style={styles.dividerText}>OR</Text>
+            </View>
+
+            <Button 
+              title="Create New Account" 
+              variant="outline" 
+              fullWidth 
+              onPress={() => navigation.navigate('Register')} 
             />
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="••••••••"
-              placeholderTextColor="#94A3B8"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
-          </View>
-          
-          <View style={styles.spacer} />
-
-          <Button 
-            title="Log In" 
-            onPress={handleLogin} 
-            isLoading={loading} 
-            fullWidth 
-          />
-          
-          <View style={styles.divider}>
-             <Text style={styles.dividerText}>OR</Text>
-          </View>
-
-          <Button 
-            title="Create New Account" 
-            variant="outline" 
-            fullWidth 
-            onPress={() => navigation.navigate('Register')} 
-          />
-        </View>
-
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -118,7 +136,8 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  content: { flex: 1, justifyContent: 'center', padding: 24 },
+  content: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 150 }, // ✅ Extra padding
   header: { alignItems: 'center', marginBottom: 40 },
   logoText: { fontSize: 40, fontWeight: '800', color: COLORS.primary, letterSpacing: -1, marginBottom: 8 },
   subtitle: { fontSize: 16, color: COLORS.textMuted },

@@ -19,6 +19,7 @@ import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
 import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import MatchListScreen from './src/screens/MatchListScreen';
+import DrillDetailScreen from './src/screens/DrillDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -59,11 +60,11 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* <Stack.Screen 
+        <Stack.Screen 
           name="CoachAction" 
           component={CoachActionScreen} 
           options={{ headerShown: false, presentation: 'modal' }} // Nice modal effect
-        /> */}
+        />
 
         <Stack.Screen 
           name="Profile" 
@@ -86,7 +87,7 @@ export default function App() {
         <Stack.Screen 
           name="ProgramDetail" 
           component={ProgramDetailScreen} 
-          options={{ headerTitle: 'Program Details', headerBackTitle: 'Back' }} 
+          options={{ headerShown: false }} 
         />
 
         <Stack.Screen 
@@ -110,6 +111,7 @@ export default function App() {
         <Stack.Screen 
           name="SessionLogDetail" 
           component={SessionLogDetailScreen} 
+          options={{ headerShown: false }}
         />
 
         <Stack.Screen 
@@ -122,17 +124,25 @@ export default function App() {
         <Stack.Screen 
           name="MatchDiary" 
           component={MatchDiaryScreen} 
-          options={{ presentation: 'modal' }} // Optional: Makes it slide up like a card
+          options={{ headerShown: false, presentation: 'modal' }}
         />
 
         <Stack.Screen 
           name="Notifications" 
           component={NotificationsScreen} 
+          options={{ headerShown: false }}
         />
 
         <Stack.Screen 
           name="MatchList" 
           component={MatchListScreen} 
+          options={{ headerShown: false }}
+        />
+
+        <Stack.Screen 
+          name="DrillDetail" 
+          component={DrillDetailScreen} 
+          options={{ headerShown: false }} 
         />
 
       </Stack.Navigator>

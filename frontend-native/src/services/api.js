@@ -162,7 +162,6 @@ export const fetchSquads = async () => {
     const response = await api.get('/squads');
     return response.data;
   } catch (error) {
-    console.error("Fetch Squads Error:", error);
     return [];
   }
 };
@@ -257,6 +256,20 @@ export const updateMatchDetails = async (matchId, updates) => {
     return response.data;
   } catch (error) {
     console.error("Update Match Error:", error);
+    throw error;
+  }
+};
+
+export const submitSessionFeedback = async (sessionId, feedback, liked) => {
+  try {
+    // ✅ CORRECT URL: Remove '/training' so it matches your other session endpoints
+    const response = await api.put(`/sessions/${sessionId}/feedback`, { 
+      feedback, 
+      liked 
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Session Feedback Error:", error);
     throw error;
   }
 };

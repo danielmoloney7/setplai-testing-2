@@ -6,7 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon } from 'lucide-react-native';
+import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon, X } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { updateProfile, fetchUserProfile } from '../services/api';
 
@@ -85,6 +85,14 @@ export default function ProfileScreen({ navigation }) {
 
   const renderHeader = () => (
     <View style={styles.header}>
+      {/* ✅ NEW: Close Button (Top Right) */}
+      <TouchableOpacity 
+        style={styles.closeBtn} 
+        onPress={() => navigation.goBack()}
+      >
+        <X size={24} color="#64748B" />
+      </TouchableOpacity>
+
       <View style={styles.avatarContainer}>
         <Text style={styles.avatarText}>{user.name ? user.name[0].toUpperCase() : 'U'}</Text>
       </View>
@@ -271,5 +279,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, 
     marginTop: 32, padding: 16, backgroundColor: '#FEF2F2', borderRadius: 16 
   },
-  logoutText: { color: '#EF4444', fontWeight: '700', fontSize: 16 }
+  logoutText: { color: '#EF4444', fontWeight: '700', fontSize: 16 },
+
+  closeBtn: {
+    position: 'absolute',
+    top: 0,
+    right: 24,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    zIndex: 10
+  },
+  
+
 });

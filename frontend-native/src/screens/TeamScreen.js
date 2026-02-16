@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Modal, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native'; // ✅ Ensure this is imported
 import { Plus, Users, Check, ChevronRight } from 'lucide-react-native';
@@ -58,11 +58,7 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
   };
 
   const handleCreateSquad = async () => {
-    // 1. Validation Feedback
-    if (!newSquadName.trim()) {
-        Alert.alert("Missing Name", "Please enter a name for your new squad.");
-        return;
-    }
+   
     
     // 2. Debugging Log
     console.log("Creating Squad:", newSquadName, selectedMembers);
@@ -73,10 +69,8 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
         setNewSquadName('');
         setSelectedMembers([]);
         loadData();
-        Alert.alert("Success", "Squad created!");
     } catch (e) {
         console.error("Create Squad Failed:", e);
-        Alert.alert("Error", "Could not create squad. Check connection.");
     }
 };
 

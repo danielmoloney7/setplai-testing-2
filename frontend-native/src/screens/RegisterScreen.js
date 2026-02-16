@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   View, Text, TextInput, StyleSheet, Alert, SafeAreaView, 
   KeyboardAvoidingView, Platform, TouchableOpacity, ScrollView 
@@ -6,7 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { registerUser } from '../services/api';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { Check, ChevronLeft } from 'lucide-react-native'; // ✅ Added ChevronLeft
+import { Check, ChevronLeft } from 'lucide-react-native';
 
 const LEVELS = ["Beginner", "Intermediate", "Advanced"];
 
@@ -23,6 +23,17 @@ export default function RegisterScreen({ navigation }) {
   
   const [loading, setLoading] = useState(false);
 
+  // ✅ Scroll Refs
+  const scrollRef = useRef(null);
+  const inputCoords = useRef({});
+
+  const scrollToInput = (fieldKey) => {
+    const y = inputCoords.current[fieldKey];
+    if (y !== undefined && scrollRef.current) {
+      scrollRef.current.scrollTo({ y: y, animated: true });
+    }
+  };
+
   const updateField = (key, value) => setFormData(prev => ({ ...prev, [key]: value }));
 
   const handleRegisterAndLogin = async () => {
@@ -32,10 +43,8 @@ export default function RegisterScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // 1. Register
       await registerUser(formData);
 
-      // 2. Auto-Login
       const loginFormData = new URLSearchParams();
       loginFormData.append('username', formData.email.toLowerCase()); 
       loginFormData.append('password', formData.password);
@@ -45,18 +54,14 @@ export default function RegisterScreen({ navigation }) {
       });
 
       const { access_token, role, name } = loginRes.data;
-      
-      // 3. Save Session
       const normalizedRole = role || (formData.role === 'COACH' ? 'COACH' : 'PLAYER');
       await AsyncStorage.setItem('access_token', access_token);
       await AsyncStorage.setItem('user_role', normalizedRole.toUpperCase()); 
       await AsyncStorage.setItem('user_name', name || formData.email.split('@')[0]);
 
-      // 4. Navigate
       navigation.replace('Main');
 
     } catch (error) {
-      console.error(error);
       const msg = error.response?.data?.detail || "Registration failed.";
       Alert.alert("Error", msg);
     } finally {
@@ -68,7 +73,6 @@ export default function RegisterScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
         
-        {/* Header with Back Button */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <ChevronLeft size={28} color={COLORS.primary} />
@@ -80,9 +84,13 @@ export default function RegisterScreen({ navigation }) {
           <View style={{width: 28}} /> 
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView 
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           
-          {/* Role Selector */}
           <View style={styles.roleContainer}>
             {['PLAYER', 'COACH'].map((r) => (
               <TouchableOpacity 
@@ -96,48 +104,60 @@ export default function RegisterScreen({ navigation }) {
             ))}
           </View>
 
-          {/* Credentials */}
           <Text style={styles.label}>Credentials</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="Email" 
-            placeholderTextColor="#94A3B8"
-            value={formData.email} 
-            onChangeText={t => updateField('email', t)} 
-            autoCapitalize="none" 
-            keyboardType="email-address"
-          />
-          <TextInput 
-            style={styles.input} 
-            placeholder="Password" 
-            placeholderTextColor="#94A3B8"
-            value={formData.password} 
-            onChangeText={t => updateField('password', t)} 
-            secureTextEntry 
-          />
-
-          {/* Profile Details (Only for Players mostly, but useful for coaches too) */}
-          <Text style={styles.label}>Profile</Text>
-          <View style={styles.row}>
-              <TextInput 
-                style={[styles.input, { flex: 1 }]} 
-                placeholder="Age" 
-                placeholderTextColor="#94A3B8"
-                value={formData.age} 
-                onChangeText={t => updateField('age', t)} 
-                keyboardType="numeric"
-              />
-              <TextInput 
-                style={[styles.input, { flex: 1 }]} 
-                placeholder="Yrs Exp." 
-                placeholderTextColor="#94A3B8"
-                value={formData.yearsExperience} 
-                onChangeText={t => updateField('yearsExperience', t)} 
-                keyboardType="numeric"
-              />
+          
+          <View onLayout={(e) => inputCoords.current['email'] = e.nativeEvent.layout.y}>
+            <TextInput 
+              style={styles.input} 
+              placeholder="Email" 
+              placeholderTextColor="#94A3B8"
+              value={formData.email} 
+              onChangeText={t => updateField('email', t)} 
+              autoCapitalize="none" 
+              keyboardType="email-address"
+              onFocus={() => scrollToInput('email')}
+            />
           </View>
 
-          {/* Level Selector */}
+          <View onLayout={(e) => inputCoords.current['password'] = e.nativeEvent.layout.y}>
+            <TextInput 
+              style={styles.input} 
+              placeholder="Password" 
+              placeholderTextColor="#94A3B8"
+              value={formData.password} 
+              onChangeText={t => updateField('password', t)} 
+              secureTextEntry 
+              onFocus={() => scrollToInput('password')}
+            />
+          </View>
+
+          <Text style={styles.label}>Profile</Text>
+          <View style={styles.row}>
+              <View style={{flex: 1}} onLayout={(e) => inputCoords.current['age'] = e.nativeEvent.layout.y}>
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Age" 
+                  placeholderTextColor="#94A3B8"
+                  value={formData.age} 
+                  onChangeText={t => updateField('age', t)} 
+                  keyboardType="numeric"
+                  onFocus={() => scrollToInput('age')}
+                />
+              </View>
+              
+              <View style={{flex: 1}} onLayout={(e) => inputCoords.current['years'] = e.nativeEvent.layout.y}>
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Yrs Exp." 
+                  placeholderTextColor="#94A3B8"
+                  value={formData.yearsExperience} 
+                  onChangeText={t => updateField('yearsExperience', t)} 
+                  keyboardType="numeric"
+                  onFocus={() => scrollToInput('years')}
+                />
+              </View>
+          </View>
+
           <View style={styles.levelRow}>
               {LEVELS.map(l => (
                   <TouchableOpacity 
@@ -150,16 +170,18 @@ export default function RegisterScreen({ navigation }) {
               ))}
           </View>
 
-          {/* Goals Input */}
-          <Text style={styles.label}>Goals</Text>
-          <TextInput 
-            style={[styles.input, styles.textArea]} 
-            placeholder="What is your main goal? (e.g. Better Serve)" 
-            placeholderTextColor="#94A3B8"
-            value={formData.goals} 
-            onChangeText={t => updateField('goals', t)} 
-            multiline
-          />
+          <View onLayout={(e) => inputCoords.current['goals'] = e.nativeEvent.layout.y}>
+            <Text style={styles.label}>Goals</Text>
+            <TextInput 
+              style={[styles.input, styles.textArea]} 
+              placeholder="What is your main goal? (e.g. Better Serve)" 
+              placeholderTextColor="#94A3B8"
+              value={formData.goals} 
+              onChangeText={t => updateField('goals', t)} 
+              multiline
+              onFocus={() => scrollToInput('goals')}
+            />
+          </View>
 
           <TouchableOpacity 
             style={[styles.mainBtn, loading && { opacity: 0.7 }]} 
@@ -188,7 +210,8 @@ const styles = StyleSheet.create({
   logoText: { fontSize: 24, fontWeight: '800', color: COLORS.primary, letterSpacing: -0.5 },
   subtitle: { fontSize: 14, color: '#64748B' },
   
-  scrollContent: { padding: 24, paddingTop: 0 },
+  // ✅ Extra padding to allow scrolling inputs to the top
+  scrollContent: { padding: 24, paddingTop: 0, paddingBottom: 250 }, 
   
   label: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginBottom: 8, marginTop: 16, textTransform: 'uppercase' },
   input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 14, fontSize: 16, color: '#0F172A', marginBottom: 12 },

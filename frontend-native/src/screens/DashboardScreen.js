@@ -14,7 +14,8 @@ import { COLORS, SHADOWS } from '../constants/theme';
 import FeedCard from '../components/FeedCard'; 
 
 export default function DashboardScreen({ navigation }) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // ✅ Controls initial full-screen loader
+  const [refreshing, setRefreshing] = useState(false); // ✅ Controls pull-to-refresh
   const [user, setUser] = useState({ name: 'Athlete', role: 'PLAYER', id: null }); 
   
   // Player State
@@ -51,7 +52,9 @@ export default function DashboardScreen({ navigation }) {
 
   // --- DATA LOADING ---
   const loadDashboard = async () => {
-    setLoading(true);
+    // ✅ FIX: Don't set setLoading(true) here. 
+    // It stays true from initial state, or we assume it's a silent update.
+    
     try {
         const [role, name, storedId] = await Promise.all([
             AsyncStorage.getItem('user_role'),
@@ -79,8 +82,14 @@ export default function DashboardScreen({ navigation }) {
     } catch (error) {
         console.log("Dashboard Error:", error);
     } finally {
-        setLoading(false);
+        setLoading(false); // Only turn off loading
+        setRefreshing(false); // Turn off refreshing
     }
+  };
+
+  const onRefresh = () => {
+      setRefreshing(true); // ✅ Handle pull-to-refresh specifically
+      loadDashboard();
   };
 
   const loadPlayerDashboard = async (initialUserId) => {
@@ -235,15 +244,13 @@ export default function DashboardScreen({ navigation }) {
 
   const getInitials = (n) => n ? n[0].toUpperCase() : 'U';
 
-  // ✅ UPDATED COACH VIEW TO HANDLE MATCHES VS SESSIONS
   const renderCoachView = () => (
     <View style={styles.section}>
-      {/* Quick Actions */}
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.grid}>
         <TouchableOpacity 
           style={[styles.actionCard, { backgroundColor: COLORS.primary }]}
-          onPress={() => navigation.navigate('ProgramBuilder', { squadMode: true })}
+          onPress={() => navigation.navigate('CoachAction')} // ✅ FIXED: Navigate to CoachAction
         >
           <Plus color="#FFF" size={32} />
           <Text style={[styles.actionText, { color: '#FFF' }]}>Create Plan</Text>
@@ -266,7 +273,6 @@ export default function DashboardScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Squads Scroll */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>My Squads</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginHorizontal: -24}} contentContainerStyle={{paddingHorizontal: 24}}>
           {mySquads.length > 0 ? (
@@ -290,13 +296,11 @@ export default function DashboardScreen({ navigation }) {
           </TouchableOpacity>
       </ScrollView>
 
-      {/* ✅ RECENT ACTIVITY FEED (Matches + Sessions) */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Recent Activity</Text>
       <View style={{ gap: 12 }}>
           {recentActivity.length > 0 ? (
               recentActivity.map(item => (
                   <View key={item.id}>
-                      {/* Player Header */}
                       <View style={{flexDirection:'row', alignItems:'center', marginBottom: 4, marginLeft: 4}}>
                           <Users size={12} color="#64748B" />
                           <Text style={{fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6}}>
@@ -304,12 +308,10 @@ export default function DashboardScreen({ navigation }) {
                           </Text>
                       </View>
 
-                      {/* CONDITIONAL RENDER: MATCH vs SESSION */}
                       {item.opponent_name ? (
-                          // 🎾 MATCH CARD
                           <TouchableOpacity 
                             style={styles.matchFeedCard}
-                            onPress={() => navigation.navigate('MatchDiary', { userId: item.user_id })} // Navigate to player's diary
+                            onPress={() => navigation.navigate('MatchDiary', { userId: item.user_id })} 
                           >
                               <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
                                   <View style={{flex: 1}}>
@@ -332,7 +334,6 @@ export default function DashboardScreen({ navigation }) {
                               </View>
                           </TouchableOpacity>
                       ) : (
-                          // 🏋️ TRAINING SESSION CARD
                           <FeedCard session={item} />
                       )}
                   </View>
@@ -348,7 +349,6 @@ export default function DashboardScreen({ navigation }) {
 
   const renderPlayerView = () => (
     <View style={styles.playerContainer}>
-        {/* Tools */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
             <Text style={styles.sectionTitle}>Tools</Text>
             <View style={styles.grid}>
@@ -531,7 +531,11 @@ export default function DashboardScreen({ navigation }) {
          </SafeAreaView>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={loading} onRefresh={loadDashboard} />}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} // ✅ Use dedicated refreshing state
+      >
+        {/* ✅ Only show full activity indicator if it's the very first load */}
         {loading && !suggestedProgram ? <ActivityIndicator size="large" color={COLORS.primary} style={{marginTop: 50}} /> : 
            (user.role.includes('COACH') ? renderCoachView() : renderPlayerView())
         }

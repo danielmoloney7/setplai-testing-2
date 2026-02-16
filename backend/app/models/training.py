@@ -26,6 +26,7 @@ class Drill(Base):
     target_value = Column(Integer, nullable=True)
     # target_prompt: e.g., "How many shots landed deep?"
     target_prompt = Column(String(255), nullable=True)
+    drill_mode = Column(String(50), default="Cooperative")
     
 class Program(Base):
     __tablename__ = "programs"
@@ -104,6 +105,10 @@ class SessionLog(Base):
     duration_minutes = Column(Integer)
     rpe = Column(Integer) 
     notes = Column(String, nullable=True)
+    
+    # ✅ NEW FIELDS: Coach Interaction
+    coach_feedback = Column(Text, nullable=True)
+    coach_liked = Column(Boolean, default=False)
     
     # Relationships
     player = relationship("User", back_populates="session_logs")
