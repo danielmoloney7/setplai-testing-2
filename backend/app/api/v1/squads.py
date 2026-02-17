@@ -51,7 +51,6 @@ class MemberProgress(BaseModel):
 
 # --- ENDPOINTS ---
 
-# ✅ FIX: Changed "/" to "" to prevent 307 Redirects
 @router.get("", response_model=List[SquadResponse])
 def get_my_squads(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "COACH":
@@ -64,7 +63,6 @@ def get_my_squads(db: Session = Depends(get_db), current_user: User = Depends(ge
         for s in squads
     ]
 
-# ✅ FIX: Changed "/" to ""
 @router.post("")
 def create_squad(squad_data: SquadCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != "COACH":
@@ -80,10 +78,22 @@ def create_squad(squad_data: SquadCreate, db: Session = Depends(get_db), current
     db.commit()
     db.refresh(new_squad)
 
-    # 2. Add Initial Members
+    # 2. Add Initial Members & Notify Them
     for player_id in squad_data.initial_members:
         member = SquadMember(squad_id=new_squad.id, player_id=player_id)
         db.add(member)
+        
+        # ✅ FIX: Notify initial members
+        notif = Notification(
+            id=str(uuid.uuid4()),
+            user_id=player_id,
+            title="Squad Invite",
+            message=f"You have been added to the squad: {new_squad.name}",
+            type="SQUAD_INVITE",
+            reference_id=new_squad.id,
+            related_user_id=current_user.id
+        )
+        db.add(notif)
     
     db.commit()
     return {"status": "success", "squad_id": new_squad.id}
@@ -93,35 +103,44 @@ def get_squad_members(squad_id: str, db: Session = Depends(get_db), current_user
     squad = db.query(Squad).filter(Squad.id == squad_id).first()
     if not squad: raise HTTPException(404, "Squad not found")
     
-    # Return full user objects
     return [m.player for m in squad.members]
 
 @router.post("/{squad_id}/members")
 def add_member(squad_id: str, data: AddMemberRequest, db: Session = Depends(get_db)):
-    # ... existing check logic ...
+    # ✅ FIX: Robust checks at the start to prevent crashes
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        raise HTTPException(404, "Squad not found")
+        
+    player = db.query(User).filter(User.id == data.player_id).first()
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    # Check if already a member
+    existing = db.query(SquadMember).filter(SquadMember.squad_id == squad_id, SquadMember.player_id == data.player_id).first()
+    if existing:
+        return {"status": "already_member"}
     
+    # 1. Add Member
     new_member = SquadMember(squad_id=squad_id, player_id=data.player_id)
     db.add(new_member)
     
-    # ✅ NOTIFICATION LOGIC START
-    squad = db.query(Squad).filter(Squad.id == squad_id).first()
-    player = db.query(User).filter(User.id == data.player_id).first()
-    
-    if player and squad and not player.coach_id:
+    # 2. Link Coach if needed
+    if not player.coach_id and squad.coach_id:
         player.coach_id = squad.coach_id
-        db.add(player) # Update player record
+        db.add(player) 
 
-    # ✅ 3. Send Notification
+    # 3. Send Notification
     notif = Notification(
         id=str(uuid.uuid4()),
         user_id=data.player_id,
         title="Squad Invite",
         message=f"You have been added to the squad: {squad.name}",
         type="SQUAD_INVITE",
-        reference_id=squad_id
+        reference_id=squad_id,
+        related_user_id=squad.coach_id
     )
     db.add(notif)
-    # ✅ NOTIFICATION LOGIC END
 
     db.commit()
     return {"status": "success"}
@@ -139,7 +158,7 @@ def remove_member(squad_id: str, player_id: str, db: Session = Depends(get_db)):
         # 3. Delete Member
         db.delete(member)
         
-        # 4. ✅ Create Notification
+        # 4. Create Notification
         notif = Notification(
             id=str(uuid.uuid4()),
             user_id=player_id,
@@ -168,8 +187,6 @@ def mark_attendance(
     
     count = 0
     for pid in data.player_ids:
-        # Check if already marked for this day to prevent dupes (simplistic check)
-        # In production, you might check date range (start of day to end of day)
         existing = db.query(SquadAttendance).filter(
             SquadAttendance.squad_id == squad_id,
             SquadAttendance.player_id == pid,
@@ -184,10 +201,8 @@ def mark_attendance(
     db.commit()
     return {"status": "success", "marked": count}
 
-# ✅ NEW: Get Squad Leaderboard
 @router.get("/{squad_id}/leaderboard", response_model=List[LeaderboardEntry])
 def get_squad_leaderboard(squad_id: str, db: Session = Depends(get_db)):
-    # 1. Get all members
     members = db.query(SquadMember).filter(SquadMember.squad_id == squad_id).all()
     if not members: return []
     
@@ -197,21 +212,15 @@ def get_squad_leaderboard(squad_id: str, db: Session = Depends(get_db)):
         player = m.player
         if not player: continue
 
-        # A. Attendance Count
         attendance_count = db.query(SquadAttendance).filter(
             SquadAttendance.squad_id == squad_id,
             SquadAttendance.player_id == player.id
         ).count()
 
-        # B. Sessions Completed (Only those assigned to this squad implicitly or explicitly)
-        # We look for logs where the program is associated with this squad or general player logs
-        # For simplicity, we count ALL sessions completed by this player as "Dedication"
         sessions_completed = db.query(SessionLog).filter(
             SessionLog.player_id == player.id
         ).count()
 
-        # C. Drill Score (Sum of achieved values)
-        # Calculate total reps/score from all drill performances
         drill_score = db.query(func.sum(DrillPerformance.achieved_value))\
             .join(SessionLog, DrillPerformance.session_log_id == SessionLog.id)\
             .filter(SessionLog.player_id == player.id)\
@@ -220,41 +229,33 @@ def get_squad_leaderboard(squad_id: str, db: Session = Depends(get_db)):
         stats.append({
             "player_id": player.id,
             "name": player.name,
-            "avatar": None, # Add avatar field to User model if you have it
+            "avatar": None, 
             "attendance_count": attendance_count,
             "sessions_completed": sessions_completed,
             "drill_score": drill_score
         })
     
-    # Sort by Sessions Completed by default
     stats.sort(key=lambda x: x['sessions_completed'], reverse=True)
-    
     return stats
 
 @router.get("/{squad_id}/progress")
 def get_squad_progress(squad_id: str, db: Session = Depends(get_db)):
-    # 1. Find the ONE active player program assigned to this squad
     active_squad_program = db.query(Program).filter(
         Program.squad_id == squad_id,
         Program.status == "ACTIVE",
-        Program.program_type == "PLAYER_PLAN" # Ensure it's the plan players execute
+        Program.program_type == "PLAYER_PLAN"
     ).first()
 
     if not active_squad_program:
         return {"player_progress": [], "squad_completion": 0}
 
-    # 2. Get all members of the squad
     members = db.query(User).join(SquadMember).filter(SquadMember.squad_id == squad_id).all()
-    
-    # 3. Calculate total distinct sessions in this specific program
-    # Assuming sessions are defined in a 'sessions' or 'schedule' field
     total_program_sessions = len(active_squad_program.sessions) 
     
     progress_results = []
     total_completed_by_all = 0
 
     for member in members:
-        # ✅ FIX: Only count logs matching this specific squad program
         completed_sessions = db.query(SessionLog).filter(
             SessionLog.player_id == member.id,
             SessionLog.program_id == active_squad_program.id

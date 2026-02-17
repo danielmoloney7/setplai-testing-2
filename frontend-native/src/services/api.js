@@ -340,4 +340,35 @@ export const fetchAthletes = async () => {
   return response.data;
 };
 
+export const requestCoach = async (code) => {
+  try {
+    const response = await api.post('/request-coach', { code });
+    return response.data;
+  } catch (error) {
+    console.error("Request Coach Error:", error);
+    throw error;
+  }
+};
+
+export const fetchCoachRequests = async () => {
+  try {
+    const response = await api.get('/coach/requests');
+    return response.data;
+  } catch (error) {
+    console.error("Fetch Requests Error:", error);
+    return [];
+  }
+};
+
+export const respondToCoachRequest = async (playerId, action) => {
+  try {
+    // action: 'ACCEPT' or 'REJECT'
+    const response = await api.post(`/coach/requests/${playerId}/respond`, { action });
+    return response.data;
+  } catch (error) {
+    console.error("Respond Error:", error);
+    throw error;
+  }
+};
+
 export default api;

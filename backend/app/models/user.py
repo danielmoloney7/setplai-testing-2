@@ -19,20 +19,21 @@ class User(Base):
     name = Column(String)
     goals = Column(String, nullable=True)
     xp = Column(Integer, default=0)
+    
+    # ✅ COACH LINKING FIELDS
     coach_id = Column(String, ForeignKey("users.id"), nullable=True)
+    coach_code = Column(String, unique=True, nullable=True) # 6-Digit Code for Coaches
+    coach_link_status = Column(String, default="NONE") # 'NONE', 'PENDING', 'ACTIVE'
+
     level = Column(String)
+    
+    # Relationships
     created_programs = relationship("Program", back_populates="creator")
     session_logs = relationship("SessionLog", back_populates="player")
     players = relationship("User", backref=backref("coach", remote_side=[id]))
-
-    # ✅ Squad Relationships
     owned_squads = relationship("Squad", back_populates="coach")
     squad_memberships = relationship("SquadMember", back_populates="player")
-
-    # ✅ NEW: Notifications (Fixes the crash)
     notifications = relationship("Notification", back_populates="user")
-
-    # ✅ NEW: Match Diary (For the new feature)
     matches = relationship("MatchEntry", backref="user")
 
 class Squad(Base):
@@ -67,10 +68,7 @@ class Notification(Base):
     message = Column(String(500))
     type = Column(String(50)) 
     reference_id = Column(String(255), nullable=True) 
-    
-    # ✅ THIS WAS MISSING
     related_user_id = Column(String, nullable=True)
-
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -79,6 +79,13 @@ class SessionFeedbackUpdate(BaseModel):
     feedback: Optional[str] = None
     liked: Optional[bool] = None
 
+# --- Coach Linking Schemas ---
+class LinkCoachRequest(BaseModel):
+    code: str
+
+class RespondRequest(BaseModel):
+    action: str # 'ACCEPT' or 'REJECT'
+
 class UserResponse(BaseModel):
     id: str
     name: str
@@ -87,6 +94,11 @@ class UserResponse(BaseModel):
     xp: int = 0
     level: Optional[str] = None
     goals: Optional[str] = None
+    # ✅ Fields for Coach Linking
+    coach_code: Optional[str] = None
+    coach_link_status: Optional[str] = "NONE"
+    coach_id: Optional[str] = None
+    
     class Config:
         from_attributes = True
 
@@ -100,8 +112,8 @@ class DrillCreate(BaseModel):
     difficulty: str = "Intermediate"
     description: Optional[str] = None
     default_duration_min: int = 10
-    target_value: Optional[int] = None # e.g. 20 Reps
-    target_prompt: Optional[str] = None # e.g. "How many did you make?"
+    target_value: Optional[int] = None 
+    target_prompt: Optional[str] = None 
     drill_mode: str = "Cooperative"
 
 # =======================
@@ -120,13 +132,10 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
     drill_map = {d.id: d.name for d in all_drills}
 
     # 2. Fallback: Fetch names from the Program Definition (Snapshot)
-    # This fixes "Custom Drill" if the master drill was deleted or IDs don't match
     program_ids = list(set([log.program_id for log in logs if log.program_id]))
     fallback_map = {}
     
     if program_ids:
-        # Get drill definitions from the programs associated with these logs
-        # ProgramSession stores the drill_name at the time of creation
         prog_sessions = db.query(ProgramSession).filter(ProgramSession.program_id.in_(program_ids)).all()
         for ps in prog_sessions:
             if ps.drill_id and ps.drill_name:
@@ -136,20 +145,14 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
     results = []
     for log in logs:
         log_model = SessionLogSchema.model_validate(log)
-        
         for perf in log_model.drill_performances:
-            # Priority 1: Current Active Drill
             if perf.drill_id in drill_map:
                 perf.drill_name = drill_map[perf.drill_id]
-            # Priority 2: Historical Program Snapshot
             elif perf.drill_id in fallback_map:
                 perf.drill_name = fallback_map[perf.drill_id]
-            # Priority 3: Fallback
             else:
                 perf.drill_name = "Custom Drill"
-        
         results.append(log_model)
-    
     return results
 
 # =======================
@@ -176,6 +179,7 @@ def seed_drills(db: Session = Depends(get_db)):
 def get_drills(db: Session = Depends(get_db)):
     return db.query(Drill).all()
 
+# ✅ UPDATED: get_programs now returns ARCHIVED programs & creator_id
 @router.get("/programs")
 def get_programs(
     db: Session = Depends(get_db),
@@ -185,16 +189,16 @@ def get_programs(
         # Fetch logic
         if "COACH" in current_user.role.upper():
             programs = db.query(Program).filter(
-                Program.creator_id == current_user.id,
-                Program.status != "ARCHIVED"  # ✅ ADD THIS FILTER
+                Program.creator_id == current_user.id
+                # ✅ FIX: Removed "Program.status != 'ARCHIVED'" so coaches see them
             ).all()
         else:
             programs = (
                 db.query(Program)
                 .join(ProgramAssignment, Program.id == ProgramAssignment.program_id)
                 .filter(
-                    ProgramAssignment.player_id == current_user.id,
-                    Program.status != "ARCHIVED" # ✅ Ensure players don't see deleted plans
+                    ProgramAssignment.player_id == current_user.id
+                    # ✅ FIX: Removed "Program.status != 'ARCHIVED'" so players see them
                 )
                 .all()
             )
@@ -203,15 +207,21 @@ def get_programs(
         for p in programs:
             # Determine Status (Overall)
             status = "PENDING"
+            
             if "COACH" in current_user.role.upper():
-                status = "ACTIVE"
+                # ✅ FIX: Use actual program status
+                status = p.status 
             else:
-                assignment = db.query(ProgramAssignment).filter(
-                    ProgramAssignment.program_id == p.id,
-                    ProgramAssignment.player_id == current_user.id
-                ).first()
-                if assignment:
-                    status = assignment.status
+                # ✅ FIX: Check if program itself is archived
+                if p.status == "ARCHIVED":
+                    status = "ARCHIVED"
+                else:
+                    assignment = db.query(ProgramAssignment).filter(
+                        ProgramAssignment.program_id == p.id,
+                        ProgramAssignment.player_id == current_user.id
+                    ).first()
+                    if assignment:
+                        status = assignment.status
 
             # Fetch Relations With Status Details
             assignments = db.query(ProgramAssignment).filter(ProgramAssignment.program_id == p.id).all()
@@ -237,10 +247,10 @@ def get_programs(
                 "id": p.id,
                 "title": p.title,
                 "description": p.description,
+                "creator_id": p.creator_id, # ✅ CRITICAL FIX: Needed for Dashboard "Coach Assigned" logic
                 "coach_name": creator_name,
                 "status": status,
                 "created_at": created_at_val,
-                # ✅ NEW: Explicitly return these fields
                 "program_type": getattr(p, "program_type", "PLAYER_PLAN"), 
                 "squad_id": getattr(p, "squad_id", None),
                 "assigned_to": assignments_data,
@@ -270,31 +280,21 @@ def create_program(
     try:
         print(f"📝 CREATING PROGRAM: {program_in.title} (Type: {program_in.program_type})")
 
-        # ============================================================
-        # ✅ FIX: Auto-Detect Squad ID if missing
-        # ============================================================
+        # Auto-Detect Squad ID if missing
         final_squad_id = program_in.squad_id
-        
-        # If squad_id wasn't sent explicitly, check if any target in 'assigned_to' is a Squad
         if not final_squad_id and program_in.assigned_to:
             for target_id in program_in.assigned_to:
                 if target_id == "SELF": continue
-                
-                # Check if this ID exists in the Squad table
                 squad_exists = db.query(Squad).filter(Squad.id == target_id).first()
                 if squad_exists:
                     final_squad_id = squad_exists.id
-                    print(f"   -> Auto-Detected Squad ID from assignments: {final_squad_id}")
                     break
-        # ============================================================
 
-        # 1. Create the Program Record
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
             creator_id=current_user.id,
             created_at=datetime.utcnow(),
-            # ✅ Save the detected or provided Squad ID
             program_type=program_in.program_type, 
             squad_id=final_squad_id,
             status="ACTIVE" 
@@ -303,12 +303,9 @@ def create_program(
         db.commit()
         db.refresh(new_program)
 
-        # 2. Add Sessions & Drills
         for sess in program_in.sessions:
             for drill in sess.drills: 
-                # Check field names safely (handle Pydantic vs dict)
                 t_prompt = drill.target_prompt if hasattr(drill, 'target_prompt') else None
-                
                 db_session = ProgramSession(
                     program_id=new_program.id,
                     day_order=sess.day,
@@ -321,9 +318,7 @@ def create_program(
                 )
                 db.add(db_session)
 
-        # 3. Handle Assignments
         if program_in.program_type == "PLAYER_PLAN":
-            print("   -> Generating Player Assignments...")
             raw_targets = program_in.assigned_to
             final_player_ids = set()
 
@@ -332,8 +327,6 @@ def create_program(
 
             for target_id in raw_targets:
                 if target_id == "SELF": continue
-                
-                # Check if target is a squad -> Expand to members
                 squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
                 if squad_members:
                     for m in squad_members:
@@ -343,8 +336,6 @@ def create_program(
 
             for player_id in final_player_ids:
                 if not player_id: continue
-                
-                # Auto-accept if assigning to self
                 final_status = "PENDING"
                 if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
                     final_status = "ACTIVE"
@@ -358,7 +349,6 @@ def create_program(
                 )
                 db.add(assignment)
                 
-                # Notification
                 if str(player_id) != str(current_user.id):
                     notif = Notification(
                         id=str(uuid.uuid4()),
@@ -369,20 +359,15 @@ def create_program(
                         reference_id=new_program.id
                     )
                     db.add(notif)
-        else:
-            print("   -> SQUAD_SESSION: Skipping assignments (Coach Only)")
-
+        
         db.commit()
         return {"status": "success", "program_id": new_program.id}
 
     except Exception as e:
         db.rollback() 
-        print(f"CRITICAL ERROR in create_program: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
-# ✅ UPDATED: Delete Program with Notifications
+# ✅ UPDATED: Delete Program -> Soft Delete for Players
 @router.delete("/programs/{program_id}")
 def delete_program(
     program_id: str,
@@ -398,14 +383,13 @@ def delete_program(
     # Case A: User is the Coach/Creator -> Archive it & Notify Players
     if program.creator_id == current_user.id:
         
-        # 1. Find all active assignments to notify players
         assignments = db.query(ProgramAssignment).filter(
             ProgramAssignment.program_id == program_id,
             ProgramAssignment.status != "ARCHIVED"
         ).all()
 
         for assignment in assignments:
-            # Don't notify self if testing
+            # Notify player
             if assignment.player_id != current_user.id:
                 notif = Notification(
                     id=str(uuid.uuid4()),
@@ -413,28 +397,43 @@ def delete_program(
                     title="Program Removed",
                     message=f"Coach {current_user.name} has removed the program '{program.title}'.",
                     type="PROGRAM_REMOVED",
-                    reference_id=None # No link needed as it's gone
+                    reference_id=None 
                 )
                 db.add(notif)
             
-            # Update status so it vanishes from their list too (if filters use assignment status)
+            # Update status to ARCHIVED
             assignment.status = "ARCHIVED"
 
-        # 2. Archive the Program itself
+        # Archive the Program itself
         program.status = "ARCHIVED"
         db.commit()
         return {"status": "success", "message": "Program archived and players notified"}
 
-    # Case B: User is a Player assigned to it -> Remove Assignment
+    # Case B: User is a Player assigned to it -> Soft Delete Assignment
     assignment = db.query(ProgramAssignment).filter(
         ProgramAssignment.program_id == program_id,
         ProgramAssignment.player_id == current_user.id
     ).first()
 
     if assignment:
-        db.delete(assignment)
+        # ✅ FIX: Mark as ARCHIVED instead of deleting row so it shows in history
+        assignment.status = "ARCHIVED"
+        
+        # Notify Coach
+        if program.creator_id:
+            notif = Notification(
+                id=str(uuid.uuid4()),
+                user_id=program.creator_id,
+                title="Player Left Program",
+                message=f"{current_user.name} has removed the program '{program.title}' from their plans.",
+                type="PROGRAM_LEFT",
+                reference_id=program.id,
+                related_user_id=current_user.id
+            )
+            db.add(notif)
+
         db.commit()
-        return {"status": "success", "message": "Removed from your plans"}
+        return {"status": "success", "message": "Archived in your plans"}
 
     raise HTTPException(status_code=403, detail="Not authorized to delete this program")
 
@@ -448,16 +447,12 @@ def get_my_active_program(
         ProgramAssignment.status == "ACTIVE"
     ).order_by(desc(ProgramAssignment.assigned_at)).first()
 
-    if not assignment:
-        return None
+    if not assignment: return None
 
     program = db.query(Program).filter(Program.id == assignment.program_id).first()
     if not program: return None
 
-    sessions_data = db.query(ProgramSession).filter(
-        ProgramSession.program_id == program.id
-    ).order_by(ProgramSession.day_order).all()
-
+    sessions_data = db.query(ProgramSession).filter(ProgramSession.program_id == program.id).order_by(ProgramSession.day_order).all()
     coach = db.query(User).filter(User.id == assignment.coach_id).first()
     
     return {
@@ -481,8 +476,7 @@ def update_program_status(
         ProgramAssignment.player_id == current_user.id
     ).first()
 
-    if not assignment:
-        raise HTTPException(404, "Assignment not found")
+    if not assignment: raise HTTPException(404, "Assignment not found")
 
     assignment.status = status_update.status
     db.commit()
@@ -499,10 +493,6 @@ def create_session_log(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    print(f"👉 RECEIVING SESSION ID: {session_data.session_id}")
-    print(f"👉 DRILLS: {len(session_data.drill_performances)}")
-
-    # 1. Create Log
     new_log = SessionLog(
         player_id=current_user.id,
         program_id=session_data.program_id,
@@ -516,7 +506,6 @@ def create_session_log(
     db.commit()
     db.refresh(new_log)
     
-    # 2. Add Performances
     for perf in session_data.drill_performances:
         db_perf = DrillPerformance(
             session_log_id=new_log.id,
@@ -526,24 +515,29 @@ def create_session_log(
         )
         db.add(db_perf)
 
-    # 3. Update XP
     xp_earned = (session_data.duration_minutes or 0) * 10
     current_user.xp = (current_user.xp or 0) + xp_earned
-    
     db.commit()
-    print("✅ SAVED")
     return {"status": "success", "log_id": new_log.id, "xp_earned": xp_earned}
 
 @router.get("/my-profile", response_model=UserResponse)
 def get_my_profile(current_user: User = Depends(get_current_user)):
     return current_user
 
+@router.put("/my-profile")
+def update_my_profile(
+    profile_data: UserUpdateSchema, 
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    current_user.goals = ",".join(profile_data.goals)
+    if profile_data.level: current_user.level = profile_data.level
+    db.commit()
+    return {"status": "success", "goals": current_user.goals, "level": current_user.level}
+
 @router.get("/my-session-logs", response_model=List[SessionLogSchema])
 def get_my_session_logs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Fetch logs with joined drills
     logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == current_user.id).order_by(desc(SessionLog.date_completed)).all()
-    
-    # Enrich with Drill Names using helper
     return enrich_logs_with_names(logs, db)
 
 @router.put("/sessions/{session_id}/feedback")
@@ -553,41 +547,14 @@ def update_session_feedback(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "COACH":
-        raise HTTPException(403, "Only coaches can leave feedback.")
-        
+    if current_user.role != "COACH": raise HTTPException(403, "Only coaches can leave feedback.")
     session = db.query(SessionLog).filter(SessionLog.id == session_id).first()
-    if not session:
-        raise HTTPException(404, "Session not found.")
-        
-    if feedback_data.feedback is not None:
-        session.coach_feedback = feedback_data.feedback
-    
-    if feedback_data.liked is not None:
-        session.coach_liked = feedback_data.liked
-        
+    if not session: raise HTTPException(404, "Session not found.")
+    if feedback_data.feedback is not None: session.coach_feedback = feedback_data.feedback
+    if feedback_data.liked is not None: session.coach_liked = feedback_data.liked
     db.commit()
     db.refresh(session)
     return session
-
-@router.put("/my-profile")
-def update_my_profile(
-    profile_data: UserUpdateSchema, 
-    current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db)
-):
-    current_user.goals = ",".join(profile_data.goals)
-    
-    # ✅ Update Level if provided
-    if profile_data.level:
-        current_user.level = profile_data.level
-        
-    db.commit()
-    return {
-        "status": "success", 
-        "goals": current_user.goals, 
-        "level": current_user.level
-    }
 
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
@@ -599,55 +566,31 @@ def get_player_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if current_user.role != "COACH":
-        raise HTTPException(403, "Only coaches can view athlete logs.")
-    
+    if current_user.role != "COACH": raise HTTPException(403, "Only coaches can view athlete logs.")
     logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id == player_id).order_by(desc(SessionLog.date_completed)).all()
-    
     return enrich_logs_with_names(logs, db)
 
 @router.get("/coach/activity")
 def get_coach_activity(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # Get all athletes linked to coach
     athlete_ids = [u.id for u in db.query(User).filter(User.coach_id == current_user.id).all()]
-    # Get all athletes in coach's squads
     squad_ids = [s.id for s in db.query(Squad).filter(Squad.coach_id == current_user.id).all()]
     squad_athlete_ids = [m.player_id for m in db.query(SquadMember).filter(SquadMember.squad_id.in_(squad_ids)).all()]
-    
     all_ids = list(set(athlete_ids + squad_athlete_ids))
 
-    # 1. Fetch Sessions (with drills joined!)
-    logs = db.query(SessionLog)\
-        .options(joinedload(SessionLog.drill_performances))\
-        .filter(SessionLog.player_id.in_(all_ids))\
-        .order_by(SessionLog.date_completed.desc())\
-        .limit(10).all()
-        
-    # 2. Enrich Sessions (Add drill names)
+    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id.in_(all_ids)).order_by(SessionLog.date_completed.desc()).limit(10).all()
     enriched_logs = enrich_logs_with_names(logs, db)
-
-    # 3. Fetch Matches
     matches = db.query(MatchEntry).filter(MatchEntry.user_id.in_(all_ids)).order_by(MatchEntry.date.desc()).limit(10).all()
 
     combined_activity = []
-    
-    # 4. Process Sessions
     for log_model in enriched_logs:
-        # Dump the FULL object (drills, duration, etc.)
         item = log_model.model_dump()
-        
-        # Add feed-specific fields
         item['type'] = "SESSION"
         item['title'] = "Completed Training"
-        item['date'] = item['date_completed'] # Normalize for sorting
-        
-        # Lookup Player Name
+        item['date'] = item['date_completed'] 
         player_name = db.query(User.name).filter(User.id == item['player_id']).scalar()
         item['player_name'] = player_name
-        
         combined_activity.append(item)
         
-    # 5. Process Matches
     for m in matches:
         combined_activity.append({
             "id": m.id,
@@ -658,22 +601,19 @@ def get_coach_activity(db: Session = Depends(get_db), current_user: User = Depen
             "date": m.date,
             "score": m.score,
             "result": m.result,
-            "user_id": m.user_id # Important for navigation
+            "user_id": m.user_id 
         })
 
-    # Sort descending
     combined_activity.sort(key=lambda x: x['date'], reverse=True)
     return combined_activity[:15]
-# ✅ UPDATED: create_drill Now Saves All Fields
+
 @router.post("/drills")
 def create_drill(
     drill_data: DrillCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "COACH":
-        raise HTTPException(403, "Only coaches can add drills.")
-
+    if current_user.role != "COACH": raise HTTPException(403, "Only coaches can add drills.")
     new_drill = Drill(
         id=generate_id(),
         name=drill_data.name,
@@ -683,7 +623,6 @@ def create_drill(
         default_duration_min=drill_data.default_duration_min,
         target_value=drill_data.target_value,
         target_prompt=drill_data.target_prompt,
-        # ✅ Save Mode
         drill_mode=drill_data.drill_mode 
     )
     db.add(new_drill)
@@ -693,22 +632,94 @@ def create_drill(
 
 @router.get("/sessions")
 def get_session_logs(
-    user_id: Optional[str] = None, # ✅ Allow filtering by specific user ID
+    user_id: Optional[str] = None, 
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
     target_id = current_user.id
-    
-    # If Coach requests a specific user's logs, allow it
-    if user_id and "COACH" in current_user.role.upper():
-        target_id = user_id
-    
-    logs = (
-        db.query(SessionLog)
-        .filter(SessionLog.player_id == target_id) # ✅ FIXED (was .user_id)
-        .options(joinedload(SessionLog.drill_performances))
-        .order_by(SessionLog.date_completed.desc()) # ✅ FIXED (was .date)
-        .all()
-    )
-    
+    if user_id and "COACH" in current_user.role.upper(): target_id = user_id
+    logs = db.query(SessionLog).filter(SessionLog.player_id == target_id).options(joinedload(SessionLog.drill_performances)).order_by(desc(SessionLog.date_completed)).all()
     return logs
+
+# ✅ COACH LINKING API ENDPOINTS
+@router.post("/request-coach")
+def request_coach(
+    data: LinkCoachRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role == "COACH":
+        raise HTTPException(status_code=400, detail="Coaches cannot link to another coach.")
+
+    coach = db.query(User).filter(User.coach_code == data.code.strip()).first()
+    
+    if not coach:
+        raise HTTPException(status_code=404, detail="Invalid Coach Code.")
+
+    current_user.coach_id = coach.id
+    current_user.coach_link_status = "PENDING"
+    db.commit()
+
+    notif = Notification(
+        id=str(uuid.uuid4()),
+        user_id=coach.id,
+        title="New Roster Request",
+        message=f"{current_user.name} wants to join your team.",
+        type="COACH_REQUEST",
+        reference_id=current_user.id,
+        related_user_id=current_user.id
+    )
+    db.add(notif)
+    db.commit()
+
+    return {"status": "success", "message": "Request sent to coach"}
+
+@router.get("/coach/requests", response_model=List[UserResponse])
+def get_coach_requests(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can view requests.")
+        
+    requests = db.query(User).filter(
+        User.coach_id == current_user.id,
+        User.coach_link_status == "PENDING"
+    ).all()
+    
+    return requests
+
+@router.post("/coach/requests/{player_id}/respond")
+def respond_to_request(
+    player_id: str,
+    data: RespondRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can respond.")
+
+    player = db.query(User).filter(User.id == player_id).first()
+    if not player or player.coach_id != current_user.id:
+        raise HTTPException(404, "Request not found.")
+
+    if data.action == "ACCEPT":
+        player.coach_link_status = "ACTIVE"
+        msg = f"Coach {current_user.name} accepted your request!"
+    else:
+        player.coach_link_status = "NONE"
+        player.coach_id = None 
+        msg = f"Coach {current_user.name} declined your request."
+
+    notif = Notification(
+        id=str(uuid.uuid4()),
+        user_id=player.id,
+        title="Coach Request Update",
+        message=msg,
+        type="COACH_RESPONSE",
+        related_user_id=current_user.id
+    )
+    db.add(notif)
+    db.commit()
+
+    return {"status": "success", "new_status": player.coach_link_status}

@@ -14,8 +14,8 @@ import { COLORS, SHADOWS } from '../constants/theme';
 import FeedCard from '../components/FeedCard'; 
 
 export default function DashboardScreen({ navigation }) {
-  const [loading, setLoading] = useState(true); // ✅ Controls initial full-screen loader
-  const [refreshing, setRefreshing] = useState(false); // ✅ Controls pull-to-refresh
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState({ name: 'Athlete', role: 'PLAYER', id: null }); 
   
   // Player State
@@ -52,9 +52,6 @@ export default function DashboardScreen({ navigation }) {
 
   // --- DATA LOADING ---
   const loadDashboard = async () => {
-    // ✅ FIX: Don't set setLoading(true) here. 
-    // It stays true from initial state, or we assume it's a silent update.
-    
     try {
         const [role, name, storedId] = await Promise.all([
             AsyncStorage.getItem('user_role'),
@@ -63,48 +60,59 @@ export default function DashboardScreen({ navigation }) {
         ]);
 
         const safeRole = (role || 'PLAYER').toUpperCase(); 
-        setUser(prev => ({ ...prev, name: name || 'Athlete', role: safeRole, id: storedId }));
+        
+        // Update user state immediately
+        const currentUser = { 
+            name: name || 'Athlete', 
+            role: safeRole, 
+            id: storedId 
+        };
+        setUser(currentUser);
 
         // Fetch Notifications
         try {
             const notifs = await fetchNotifications();
             const unread = notifs.filter(n => !n.is_read).length;
             setUnreadCount(unread);
-        } catch (e) {
-            console.log("Notif fetch error", e);
-        }
+        } catch (e) { console.log("Notif fetch error", e); }
 
         if (safeRole === 'PLAYER') {
-            await loadPlayerDashboard(storedId);
+            await loadPlayerDashboard(storedId); 
         } else {
             await loadCoachDashboard();
         }
     } catch (error) {
         console.log("Dashboard Error:", error);
     } finally {
-        setLoading(false); // Only turn off loading
-        setRefreshing(false); // Turn off refreshing
+        setLoading(false); 
+        setRefreshing(false); 
     }
   };
 
   const onRefresh = () => {
-      setRefreshing(true); // ✅ Handle pull-to-refresh specifically
+      setRefreshing(true); 
       loadDashboard();
   };
 
   const loadPlayerDashboard = async (initialUserId) => {
-      const [myPrograms, myLogs, profile] = await Promise.all([
+      let currentUserId = initialUserId;
+
+      // 1. Ensure we have a valid User ID from profile if storage was empty
+      try {
+          const profile = await fetchUserProfile();
+          if (profile?.id) {
+              currentUserId = profile.id;
+              await AsyncStorage.setItem('user_id', profile.id.toString());
+              // Update state so the render logic has the ID
+              setUser(prev => ({ ...prev, id: profile.id }));
+          }
+      } catch(e) { console.log("Profile fetch error in dash", e); }
+
+      const [myPrograms, myLogs] = await Promise.all([
           fetchPrograms(),
-          fetchSessionLogs(),
-          fetchUserProfile()
+          fetchSessionLogs()
       ]); 
       
-      const realUserId = profile?.id || initialUserId;
-      if (profile?.id && profile.id !== initialUserId) {
-          AsyncStorage.setItem('user_id', profile.id.toString());
-          setUser(prev => ({ ...prev, id: profile.id }));
-      }
-
       setHasHistory(myLogs.length > 0);
 
       const pending = myPrograms.filter(p => (p.status || '').toUpperCase() === 'PENDING');
@@ -112,7 +120,9 @@ export default function DashboardScreen({ navigation }) {
 
       const active = myPrograms.filter(p => (p.status || '').toUpperCase() === 'ACTIVE');
       setActivePlanCount(active.length);
-      calculateNextSessions(active, myLogs);
+      
+      // ✅ FIX: Pass the confirmed currentUserId explicitly
+      calculateNextSessions(active, myLogs, currentUserId);
 
       const unfinishedActivePrograms = active.filter(p => {
           const schedule = p.schedule || p.sessions || [];
@@ -124,23 +134,23 @@ export default function DashboardScreen({ navigation }) {
 
       if (unfinishedActivePrograms.length > 0 || pending.length > 0) {
           setSuggestedProgram(null);
-          if (realUserId) AsyncStorage.removeItem(`suggested_program_${realUserId}`);
+          if (currentUserId) AsyncStorage.removeItem(`suggested_program_${currentUserId}`);
           return;
       }
 
       let foundSuggestion = null;
-      if (realUserId) {
+      if (currentUserId) {
           try {
-              const savedJson = await AsyncStorage.getItem(`suggested_program_${realUserId}`);
+              const savedJson = await AsyncStorage.getItem(`suggested_program_${currentUserId}`);
               if (savedJson) {
                   foundSuggestion = JSON.parse(savedJson);
                   setSuggestedProgram(foundSuggestion);
               }
-          } catch (e) { console.log("Storage read error", e); }
+          } catch (e) {}
       }
 
       if (!foundSuggestion && !suggestedProgram && !isGeneratingSuggestion) {
-          generateSuggestion(profile, myLogs, realUserId);
+          generateSuggestion({}, myLogs, currentUserId);
       }
   };
 
@@ -153,13 +163,8 @@ export default function DashboardScreen({ navigation }) {
       setRecentActivity(activityData || []);
   };
 
-  useFocusEffect(
-    useCallback(() => { 
-        loadDashboard(); 
-    }, []) 
-  );
+  useFocusEffect(useCallback(() => { loadDashboard(); }, []));
 
-  // --- AI LOGIC (Unchanged) ---
   const generateSuggestion = async (profile, logs, userId) => {
     if (!userId) return;
     setIsGeneratingSuggestion(true);
@@ -214,24 +219,39 @@ export default function DashboardScreen({ navigation }) {
       generateSuggestion(profile, logs, user.id);
   };
 
-  const calculateNextSessions = (activePrograms, logs) => {
+  // ✅ FIX: Calculate assignment status HERE using the explicit user ID
+  const calculateNextSessions = (activePrograms, logs, currentUserId) => {
       if (!activePrograms || activePrograms.length === 0) { setUpNextSessions([]); return; }
+      
       const sortedPrograms = activePrograms.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       const upcoming = [];
+      
       sortedPrograms.forEach(program => {
           const rawSchedule = program.schedule || program.sessions || [];
           if (rawSchedule.length === 0) return;
+          
           const completedDays = logs.filter(log => log.program_id === program.id).map(log => log.session_id);
           const nextDrill = rawSchedule.find(item => !completedDays.includes(item.day_order));
+          
           if (nextDrill) {
               const nextDayNum = nextDrill.day_order;
               const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
               const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes || d.duration || 0)), 0);
+              
+              // ✅ LOGIC: If creator_id exists AND it matches currentUserId -> Player Assigned
+              // If creator_id exists AND it does NOT match -> Coach Assigned
+              // Default to Player Assigned if unsure (avoids frightening "Coach Assigned" label)
+              let isCoachAssigned = false;
+              if (program.creator_id && currentUserId) {
+                  isCoachAssigned = String(program.creator_id) !== String(currentUserId);
+              }
+
               upcoming.push({
                   uniqueId: `${program.id}_day_${nextDayNum}`,
                   title: `Day ${nextDayNum} Training`, 
                   programTitle: program.title || "Untitled Program",
                   coachName: program.coach_name || "Self-Guided",
+                  isCoachAssigned: isCoachAssigned, 
                   duration: totalMins > 0 ? totalMins : 15,
                   drillCount: sessionDrills.length,
                   programId: program.id,
@@ -250,7 +270,7 @@ export default function DashboardScreen({ navigation }) {
       <View style={styles.grid}>
         <TouchableOpacity 
           style={[styles.actionCard, { backgroundColor: COLORS.primary }]}
-          onPress={() => navigation.navigate('CoachAction')} // ✅ FIXED: Navigate to CoachAction
+          onPress={() => navigation.navigate('CoachAction')} 
         >
           <Plus color="#FFF" size={32} />
           <Text style={[styles.actionText, { color: '#FFF' }]}>Create Plan</Text>
@@ -291,8 +311,8 @@ export default function DashboardScreen({ navigation }) {
               <View style={styles.emptyBox}><Text style={styles.emptyText}>No squads yet.</Text></View>
           )}
           <TouchableOpacity style={[styles.squadCard, {borderStyle:'dashed', borderColor: COLORS.primary}]} onPress={() => navigation.navigate('Team')}>
-             <View style={[styles.squadIcon, {backgroundColor: '#F0FDF4'}]}><Plus size={24} color={COLORS.primary}/></View>
-             <Text style={[styles.squadName, {color: COLORS.primary}]}>Add Squad</Text>
+              <View style={[styles.squadIcon, {backgroundColor: '#F0FDF4'}]}><Plus size={24} color={COLORS.primary}/></View>
+              <Text style={[styles.squadName, {color: COLORS.primary}]}>Add Squad</Text>
           </TouchableOpacity>
       </ScrollView>
 
@@ -406,7 +426,6 @@ export default function DashboardScreen({ navigation }) {
 
         <Text style={[styles.sectionHeader, { paddingHorizontal: 24 }]}>Up Next</Text>
         <View style={{ paddingHorizontal: 24 }}>
-          
           {(isGeneratingSuggestion || suggestedProgram) && (
               <Animated.View style={[styles.suggestedCard, { transform: [{ scale: bounceAnim }] }]}>
                   <View style={styles.suggestedBadge}>
@@ -451,7 +470,8 @@ export default function DashboardScreen({ navigation }) {
                 <View style={styles.upNextHeader}>
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
                     
-                    {sessionItem.creatorId && sessionItem.creatorId !== user.id ? (
+                    {/* ✅ FIXED: Use the pre-calculated logic */}
+                    {sessionItem.isCoachAssigned ? (
                         <View style={[styles.planBadge, { backgroundColor: '#7C3AED' }]}>
                             <Text style={[styles.planBadgeText, { color: '#FFF' }]}>COACH ASSIGNED</Text>
                         </View>
@@ -508,33 +528,35 @@ export default function DashboardScreen({ navigation }) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
       <View style={styles.headerBlock}>
-         <SafeAreaView edges={['top', 'left', 'right']}>
+          <SafeAreaView edges={['top', 'left', 'right']}>
             <View style={styles.headerRow}>
               <View>
                 <Text style={styles.headerTitle}>{user.role.includes('COACH') ? 'Coach Dashboard' : `Hello, ${user.name}`}</Text>
                 <Text style={styles.headerSubtitle}>Let's get to work.</Text>
               </View>
-              {user.role.includes('COACH') ? (
-                  <TouchableOpacity style={styles.avatarBtn} onPress={() => navigation.navigate('Profile')}>
-                      <Text style={styles.avatarText}>{getInitials(user.name)}</Text>
-                  </TouchableOpacity>
-              ) : (
+              
+              {/* ✅ NEW: Row for Bell + Profile (Both roles see both) */}
+              <View style={{flexDirection: 'row', gap: 12}}>
                   <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Notifications')}>
                       <Bell color="#FFF" size={20} />
                       {unreadCount > 0 && <View style={styles.badgeDot} />}
                   </TouchableOpacity>
-              )}
+
+                  <TouchableOpacity style={styles.avatarBtn} onPress={() => navigation.navigate('Profile')}>
+                      <Text style={styles.avatarText}>{getInitials(user.name)}</Text>
+                  </TouchableOpacity>
+              </View>
+
             </View>
-         </SafeAreaView>
+          </SafeAreaView>
       </View>
 
       <ScrollView 
         contentContainerStyle={styles.scrollContent} 
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} // ✅ Use dedicated refreshing state
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* ✅ Only show full activity indicator if it's the very first load */}
         {loading && !suggestedProgram ? <ActivityIndicator size="large" color={COLORS.primary} style={{marginTop: 50}} /> : 
-           (user.role.includes('COACH') ? renderCoachView() : renderPlayerView())
+            (user.role.includes('COACH') ? renderCoachView() : renderPlayerView())
         }
       </ScrollView>
     </View>
@@ -555,21 +577,16 @@ const styles = StyleSheet.create({
   sectionHeader: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12, marginTop: 8, paddingHorizontal: 24 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 16 },
   section: { marginBottom: 24, paddingHorizontal: 24 },
-  
-  // Squad Cards
   squadCard: { width: 140, padding: 16, backgroundColor: '#FFF', borderRadius: 16, marginRight: 12, alignItems: 'flex-start', borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   squadIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   squadInitial: { fontSize: 16, fontWeight: '700', color: '#64748B' },
   squadName: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
   squadCount: { fontSize: 12, color: '#64748B' },
   emptyBox: { padding: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, borderStyle: 'dashed' },
-  
-  // Player Cards
   inviteBanner: { backgroundColor: '#FFF7ED', marginHorizontal: 24, marginBottom: 24, padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#FED7AA' },
   notifIcon: { width: 40, height: 40, backgroundColor: '#FFEDD5', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   inviteTitle: { fontSize: 15, fontWeight: '700', color: '#9A3412' },
   inviteSub: { fontSize: 13, color: '#C2410C' },
-  
   upNextCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium, marginBottom: 16 },
   upNextHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   tag: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
@@ -581,16 +598,11 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: 16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: '#475569', fontWeight: '500' },
-
   emptyCard: { padding: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, borderStyle: 'dashed' },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
-  subText: { color: '#CBD5E1', fontSize: 12, marginTop: 4 },
-
   grid: { flexDirection: 'row', gap: 16 },
   actionCard: { flex: 1, backgroundColor: '#FFF', padding: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.card },
   actionText: { fontWeight: 'bold', fontSize: 14, color: '#334155' },
-  
-  // Suggested Program Card
   suggestedCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, borderWidth: 2, borderColor: '#15803D', borderStyle: 'dashed', ...SHADOWS.medium, marginBottom: 20 },
   suggestedBadge: { backgroundColor: '#15803D', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginBottom: 12 },
   suggestedBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
@@ -601,14 +613,11 @@ const styles = StyleSheet.create({
   acceptAiText: { color: '#FFF', fontWeight: '700' },
   regenBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 10 },
   regenText: { color: '#64748B', fontWeight: '600' },
-
   horizontalScroll: { marginBottom: 24, marginHorizontal: 0 },
   quickCard: { backgroundColor: '#FFF', width: 160, padding: 16, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   quickTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
   quickDesc: { fontSize: 12, color: '#64748B', lineHeight: 16 },
-
-  // Match Feed Card
   matchFeedCard: { backgroundColor: '#FFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   matchEvent: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
   matchVs: { fontSize: 12, color: '#64748B' },
@@ -616,5 +625,6 @@ const styles = StyleSheet.create({
   matchResultText: { fontSize: 10, fontWeight: '800' },
   matchScore: { fontSize: 12, fontWeight: '600', color: '#334155' },
   plannedBadge: { flexDirection: 'row', gap: 4, backgroundColor: '#FFF7ED', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  plannedText: { fontSize: 10, fontWeight: '800', color: '#B45309' }
+  plannedText: { fontSize: 10, fontWeight: '800', color: '#B45309' },
+  playerContainer: { flex: 1 }
 });

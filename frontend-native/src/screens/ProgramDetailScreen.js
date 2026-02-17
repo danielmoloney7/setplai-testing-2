@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2 } from 'lucide-react-native';
+import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2, User } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { fetchSessionLogs, updateProgramStatus, deleteProgram } from '../services/api';
 
@@ -81,7 +81,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
   };
 
   const handleDelete = () => {
-    // ✅ Updated Warning Message
     const message = role === 'COACH' 
         ? "Warning: Deleting this program will remove it from ALL players assigned to it. They will be notified. Are you sure?" 
         : "Are you sure you want to remove this program from your plans?";
@@ -138,6 +137,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Info Card */}
         <View style={styles.headerCard}>
             <Text style={styles.title}>{program.title}</Text>
             <Text style={styles.desc}>{program.description}</Text>
@@ -147,6 +147,49 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         </View>
 
+        {/* ✅ COACH ONLY: Assignment Details */}
+        {role === 'COACH' && (
+            <View style={styles.assignmentCard}>
+                <Text style={styles.sectionTitle}>Assignments</Text>
+                
+                {/* Squad vs Individual Indicator */}
+                {program.squad_id ? (
+                    <View style={[styles.typeBadge, { backgroundColor: '#E0E7FF', borderColor: '#C7D2FE' }]}>
+                        <Users size={16} color="#4F46E5" />
+                        <Text style={[styles.typeText, { color: '#4338CA' }]}>Assigned to Squad</Text>
+                    </View>
+                ) : (
+                    <View style={[styles.typeBadge, { backgroundColor: '#DCFCE7', borderColor: '#BBF7D0' }]}>
+                        <User size={16} color="#15803D" />
+                        <Text style={[styles.typeText, { color: '#166534' }]}>Individual Assignment</Text>
+                    </View>
+                )}
+
+                {/* Athlete List */}
+                <View style={styles.athleteList}>
+                    {program.assigned_to && program.assigned_to.length > 0 ? (
+                        program.assigned_to.map((player, index) => (
+                            <View key={index} style={styles.athleteRow}>
+                                <Text style={styles.athleteName}>{player.name}</Text>
+                                <View style={[
+                                    styles.statusTag, 
+                                    player.status === 'ACTIVE' ? styles.statusActive : styles.statusPending
+                                ]}>
+                                    <Text style={[
+                                        styles.statusText,
+                                        player.status === 'ACTIVE' ? styles.textActive : styles.textPending
+                                    ]}>{player.status}</Text>
+                                </View>
+                            </View>
+                        ))
+                    ) : (
+                        <Text style={styles.noAssignText}>No athletes assigned yet.</Text>
+                    )}
+                </View>
+            </View>
+        )}
+
+        {/* Pending Banner (Player Side) */}
         {role === 'PLAYER' && currentStatus === 'PENDING' && (
             <View style={styles.pendingBanner}>
                 <AlertCircle size={20} color="#C2410C" />
@@ -156,6 +199,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
         <Text style={styles.sectionTitle}>Session Schedule</Text>
         
+        {/* Sessions List */}
         {sessionList.map((session, index) => {
             const isCompleted = completedDays.includes(session.day_order);
             return (
@@ -187,6 +231,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
         })}
       </ScrollView>
 
+      {/* Footer Actions */}
       <View style={styles.footer}>
         {role === 'PLAYER' && currentStatus === 'PENDING' ? (
              <View style={styles.pendingActions}>
@@ -225,6 +270,21 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: 16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: '#64748B', fontWeight: '600' },
+
+  // ✅ New Assignment Styles
+  assignmentCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0' },
+  typeBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 16 },
+  typeText: { fontWeight: '700', fontSize: 14 },
+  athleteList: { gap: 12 },
+  athleteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  athleteName: { fontSize: 14, fontWeight: '600', color: '#334155' },
+  statusTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  statusActive: { backgroundColor: '#DCFCE7' },
+  statusPending: { backgroundColor: '#FFEDD5' },
+  statusText: { fontSize: 10, fontWeight: '700' },
+  textActive: { color: '#15803D' },
+  textPending: { color: '#C2410C' },
+  noAssignText: { color: '#94A3B8', fontStyle: 'italic', fontSize: 13 },
 
   pendingBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7ED', padding: 16, borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: '#FED7AA' },
   pendingBannerText: { fontSize: 13, fontWeight: '700', color: '#C2410C', flex: 1 },
