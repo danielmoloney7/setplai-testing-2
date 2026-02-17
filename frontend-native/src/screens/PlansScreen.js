@@ -19,6 +19,9 @@ export default function PlansScreen({ navigation }) {
   const loadData = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
+        // ✅ 1. Get User ID for robust comparison
+        const userId = await AsyncStorage.getItem('user_id');
+
         const [dbPrograms, dbLogs] = await Promise.all([
             fetchPrograms(),
             fetchSessionLogs()
@@ -40,14 +43,16 @@ export default function PlansScreen({ navigation }) {
             const progress = totalSessions > 0 ? (completedCount / totalSessions) * 100 : 0;
             const isFinished = totalSessions > 0 && completedCount >= totalSessions;
 
+            // ✅ 2. Fix Logic: Compare creator_id with current userId
+            const isCoachAssigned = program.creator_id && 
+                                    program.creator_id !== userId;
+
             const enriched = { 
                 ...program, 
                 progress, 
                 completedCount, 
                 totalSessions,
-                isCoachAssigned: program.coach_name && 
-                                 program.coach_name !== 'System' && 
-                                 program.coach_name !== 'Self-Guided'
+                isCoachAssigned 
             };
 
             if (program.status === 'PENDING') {
@@ -117,11 +122,11 @@ export default function PlansScreen({ navigation }) {
                 ) : item.isCoachAssigned ? (
                     <View style={styles.coachBadge}>
                         <User size={10} color="#FFF" style={{marginRight: 4}}/>
-                        <Text style={styles.coachBadgeText}>COACH</Text>
+                        <Text style={styles.coachBadgeText}>COACH ASSIGNED</Text>
                     </View>
                 ) : !isCompleted && (
                     <View style={styles.playerBadge}>
-                        <Text style={styles.playerBadgeText}>SELF</Text>
+                        <Text style={styles.playerBadgeText}>PLAYER ASSIGNED</Text>
                     </View>
                 )}
             </View>
@@ -206,9 +211,6 @@ export default function PlansScreen({ navigation }) {
             </>
         )}
       </ScrollView>
-
-      {/* ❌ REMOVED DUPLICATE FAB */}
-
     </SafeAreaView>
   );
 }
@@ -243,7 +245,6 @@ const styles = StyleSheet.create({
   metaText: { fontSize: 12, color: '#64748B', fontWeight: '600' },
   emptyContainer: { alignItems: 'center', padding: 30, borderStyle: 'dashed', borderWidth: 2, borderColor: '#E2E8F0', borderRadius: 16, marginTop: 10 },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600' },
-  // FAB styles removed
   pendingActions: { flexDirection: 'row', gap: 12, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#FDBA74' },
   acceptBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#DCFCE7', padding: 10, borderRadius: 8 },
   acceptText: { color: '#16A34A', fontWeight: '700', fontSize: 13 },

@@ -1,17 +1,18 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check } from 'lucide-react-native';
+import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchSessionLogs, updateProgramStatus } from '../services/api';
+import { fetchSessionLogs, updateProgramStatus, deleteProgram } from '../services/api';
 
 export default function ProgramDetailScreen({ navigation, route }) {
   const { program } = route.params || {};
   const [role, setRole] = useState('PLAYER');
   const [completedDays, setCompletedDays] = useState([]);
   const [currentStatus, setCurrentStatus] = useState(program?.status);
+  const [loading, setLoading] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -19,7 +20,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
             const storedRole = await AsyncStorage.getItem('user_role');
             setRole(storedRole ? storedRole.toUpperCase() : 'PLAYER');
             
-            // Sync status if passed in params was stale
             if (program?.status) setCurrentStatus(program.status);
 
             if (program?.id) {
@@ -40,17 +40,69 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   if (!program) return null;
 
-  // Handle Accept/Decline Logic
   const handleStatusChange = async (newStatus) => {
     try {
         await updateProgramStatus(program.id, newStatus);
         setCurrentStatus(newStatus);
-        Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
         
-        // Go back if declined, otherwise stay
+        if (Platform.OS === 'web') {
+            alert(newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
+        } else {
+            Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
+        }
+        
         if (newStatus === 'DECLINED') navigation.goBack();
     } catch (e) {
         Alert.alert("Error", "Could not update status.");
+    }
+  };
+
+  const handleReturn = () => {
+      if (navigation.canGoBack()) {
+          navigation.goBack();
+      } else {
+          const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
+          navigation.navigate('Main', { screen: targetTab });
+      }
+  };
+
+  const performDelete = async () => {
+      setLoading(true);
+      try {
+          await deleteProgram(program.id);
+          const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
+          navigation.navigate('Main', { screen: targetTab });
+      } catch (e) {
+          console.error(e);
+          setLoading(false);
+          const msg = "Error: Could not delete program.";
+          Platform.OS === 'web' ? alert(msg) : Alert.alert("Error", msg);
+      }
+  };
+
+  const handleDelete = () => {
+    // ✅ Updated Warning Message
+    const message = role === 'COACH' 
+        ? "Warning: Deleting this program will remove it from ALL players assigned to it. They will be notified. Are you sure?" 
+        : "Are you sure you want to remove this program from your plans?";
+    
+    if (Platform.OS === 'web') {
+        if (window.confirm(message)) {
+            performDelete();
+        }
+    } else {
+        Alert.alert(
+            role === 'COACH' ? "Delete Program & Notify" : "Remove Program",
+            message,
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Delete", 
+                    style: "destructive", 
+                    onPress: performDelete 
+                }
+            ]
+        );
     }
   };
 
@@ -64,24 +116,28 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   const sessionList = Object.values(groupedSessions || {});
 
-  const handleReturn = () => {
-      const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
-      navigation.navigate('Main', { screen: targetTab });
-  };
+  const Container = Platform.OS === 'web' ? View : SafeAreaView;
+  const containerProps = Platform.OS === 'web' ? { style: styles.container } : { style: styles.container, edges: ['top', 'bottom'] };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <Container {...containerProps}>
       <View style={styles.headerRow}>
           <TouchableOpacity onPress={handleReturn} style={styles.backBtn}>
               <ChevronLeft size={24} color="#334155" />
           </TouchableOpacity>
+          
           <Text style={styles.headerTitle}>Program Details</Text>
-          <View style={{width: 24}} />
+          
+          <TouchableOpacity onPress={handleDelete} style={styles.backBtn} disabled={loading}>
+              {loading ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+              ) : (
+                  <Trash2 size={24} color="#EF4444" />
+              )}
+          </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* Header Info */}
         <View style={styles.headerCard}>
             <Text style={styles.title}>{program.title}</Text>
             <Text style={styles.desc}>{program.description}</Text>
@@ -91,7 +147,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         </View>
 
-        {/* ✅ PENDING ALERT */}
         {role === 'PLAYER' && currentStatus === 'PENDING' && (
             <View style={styles.pendingBanner}>
                 <AlertCircle size={20} color="#C2410C" />
@@ -103,18 +158,14 @@ export default function ProgramDetailScreen({ navigation, route }) {
         
         {sessionList.map((session, index) => {
             const isCompleted = completedDays.includes(session.day_order);
-
             return (
                 <TouchableOpacity 
                     key={index} 
                     style={[styles.sessionCard, isCompleted && styles.completedCard]}
-                    disabled={role === 'PLAYER' && currentStatus === 'PENDING'} // Disable click if pending
+                    disabled={role === 'PLAYER' && currentStatus === 'PENDING'}
                     onPress={() => {
-                        if (isCompleted) {
-                            navigation.navigate('SessionSummary', { session: session, programId: program.id });
-                        } else {
-                            navigation.navigate('Session', { session: session, programId: program.id });
-                        }
+                        const targetScreen = isCompleted ? 'SessionSummary' : 'Session';
+                        navigation.navigate(targetScreen, { session: session, programId: program.id });
                     }}
                 >
                     <View style={styles.sessionHeader}>
@@ -136,7 +187,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
         })}
       </ScrollView>
 
-      {/* ✅ NEW FOOTER LOGIC */}
       <View style={styles.footer}>
         {role === 'PLAYER' && currentStatus === 'PENDING' ? (
              <View style={styles.pendingActions}>
@@ -158,7 +208,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
              </TouchableOpacity>
         )}
       </View>
-    </SafeAreaView>
+    </Container>
   );
 }
 
@@ -166,7 +216,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   headerTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 8, borderRadius: 8 },
   content: { padding: 24 },
   
   headerCard: { backgroundColor: '#FFF', padding: 24, borderRadius: 16, marginBottom: 24, ...SHADOWS.medium },
@@ -198,7 +248,6 @@ const styles = StyleSheet.create({
   doneBtn: { backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
   doneBtnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
 
-  // ✅ New Footer Action Styles
   pendingActions: { flexDirection: 'row', gap: 16 },
   acceptBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#DCFCE7', padding: 16, borderRadius: 12 },
   acceptText: { color: '#16A34A', fontWeight: '800', fontSize: 16 },

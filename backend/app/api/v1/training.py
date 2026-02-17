@@ -6,9 +6,10 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from app.core.database import get_db
-from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id
-from app.models.user import User, SquadMember
+from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id, MatchEntry
+from app.models.user import User, SquadMember, Notification, Squad
 from app.core.security import get_current_user
+import uuid
 
 
 router = APIRouter()
@@ -50,7 +51,7 @@ class DrillPerformanceCreate(BaseModel):
 
 class DrillPerformanceSchema(DrillPerformanceCreate):
     id: str
-    drill_name: Optional[str] = None # ✅ ADDED: Field for the drill name
+    drill_name: Optional[str] = None 
     
     class Config:
         from_attributes = True
@@ -65,11 +66,18 @@ class SessionLogCreate(BaseModel):
 
 class SessionLogSchema(SessionLogCreate):
     id: str
+    player_id: str
     date_completed: datetime 
     drill_performances: List[DrillPerformanceSchema] = []
-    
+    coach_feedback: Optional[str] = None
+    coach_liked: bool = False
+
     class Config:
         from_attributes = True
+
+class SessionFeedbackUpdate(BaseModel):
+    feedback: Optional[str] = None
+    liked: Optional[bool] = None
 
 class UserResponse(BaseModel):
     id: str
@@ -77,11 +85,14 @@ class UserResponse(BaseModel):
     email: str
     role: str
     xp: int = 0
+    level: Optional[str] = None
+    goals: Optional[str] = None
     class Config:
         from_attributes = True
 
 class UserUpdateSchema(BaseModel):
     goals: List[str]
+    level: Optional[str] = None
 
 class DrillCreate(BaseModel):
     name: str
@@ -89,6 +100,9 @@ class DrillCreate(BaseModel):
     difficulty: str = "Intermediate"
     description: Optional[str] = None
     default_duration_min: int = 10
+    target_value: Optional[int] = None # e.g. 20 Reps
+    target_prompt: Optional[str] = None # e.g. "How many did you make?"
+    drill_mode: str = "Cooperative"
 
 # =======================
 # 2. HELPER FUNCTIONS
@@ -101,22 +115,38 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
     if not logs:
         return []
 
-    # 1. Fetch all drills for lookup
+    # 1. Fetch all active drills for primary lookup
     all_drills = db.query(Drill).all()
     drill_map = {d.id: d.name for d in all_drills}
 
-    # 2. Convert and Enrich
+    # 2. Fallback: Fetch names from the Program Definition (Snapshot)
+    # This fixes "Custom Drill" if the master drill was deleted or IDs don't match
+    program_ids = list(set([log.program_id for log in logs if log.program_id]))
+    fallback_map = {}
+    
+    if program_ids:
+        # Get drill definitions from the programs associated with these logs
+        # ProgramSession stores the drill_name at the time of creation
+        prog_sessions = db.query(ProgramSession).filter(ProgramSession.program_id.in_(program_ids)).all()
+        for ps in prog_sessions:
+            if ps.drill_id and ps.drill_name:
+                fallback_map[ps.drill_id] = ps.drill_name
+
+    # 3. Convert and Enrich
     results = []
     for log in logs:
-        # Convert to Pydantic model (using from_orm / model_validate logic)
         log_model = SessionLogSchema.model_validate(log)
         
-        # Inject Drill Names
         for perf in log_model.drill_performances:
+            # Priority 1: Current Active Drill
             if perf.drill_id in drill_map:
                 perf.drill_name = drill_map[perf.drill_id]
+            # Priority 2: Historical Program Snapshot
+            elif perf.drill_id in fallback_map:
+                perf.drill_name = fallback_map[perf.drill_id]
+            # Priority 3: Fallback
             else:
-                perf.drill_name = "Custom Drill" # Fallback if ID not found
+                perf.drill_name = "Custom Drill"
         
         results.append(log_model)
     
@@ -154,12 +184,18 @@ def get_programs(
     try:
         # Fetch logic
         if "COACH" in current_user.role.upper():
-            programs = db.query(Program).filter(Program.creator_id == current_user.id).all()
+            programs = db.query(Program).filter(
+                Program.creator_id == current_user.id,
+                Program.status != "ARCHIVED"  # ✅ ADD THIS FILTER
+            ).all()
         else:
             programs = (
                 db.query(Program)
                 .join(ProgramAssignment, Program.id == ProgramAssignment.program_id)
-                .filter(ProgramAssignment.player_id == current_user.id)
+                .filter(
+                    ProgramAssignment.player_id == current_user.id,
+                    Program.status != "ARCHIVED" # ✅ Ensure players don't see deleted plans
+                )
                 .all()
             )
         
@@ -223,6 +259,7 @@ def get_programs(
         return results
     except Exception as e:
         print(f"Error fetching programs: {e}")
+        return []
 
 @router.post("/programs")
 def create_program(
@@ -233,15 +270,34 @@ def create_program(
     try:
         print(f"📝 CREATING PROGRAM: {program_in.title} (Type: {program_in.program_type})")
 
+        # ============================================================
+        # ✅ FIX: Auto-Detect Squad ID if missing
+        # ============================================================
+        final_squad_id = program_in.squad_id
+        
+        # If squad_id wasn't sent explicitly, check if any target in 'assigned_to' is a Squad
+        if not final_squad_id and program_in.assigned_to:
+            for target_id in program_in.assigned_to:
+                if target_id == "SELF": continue
+                
+                # Check if this ID exists in the Squad table
+                squad_exists = db.query(Squad).filter(Squad.id == target_id).first()
+                if squad_exists:
+                    final_squad_id = squad_exists.id
+                    print(f"   -> Auto-Detected Squad ID from assignments: {final_squad_id}")
+                    break
+        # ============================================================
+
         # 1. Create the Program Record
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
             creator_id=current_user.id,
             created_at=datetime.utcnow(),
-            # ✅ Ensure these fields are saved
+            # ✅ Save the detected or provided Squad ID
             program_type=program_in.program_type, 
-            squad_id=program_in.squad_id
+            squad_id=final_squad_id,
+            status="ACTIVE" 
         )
         db.add(new_program)
         db.commit()
@@ -250,6 +306,9 @@ def create_program(
         # 2. Add Sessions & Drills
         for sess in program_in.sessions:
             for drill in sess.drills: 
+                # Check field names safely (handle Pydantic vs dict)
+                t_prompt = drill.target_prompt if hasattr(drill, 'target_prompt') else None
+                
                 db_session = ProgramSession(
                     program_id=new_program.id,
                     day_order=sess.day,
@@ -258,13 +317,11 @@ def create_program(
                     duration_minutes=drill.duration,
                     notes=drill.notes or "",
                     target_value=drill.target_value,
-                    target_prompt=drill.target_prompt
+                    target_prompt=t_prompt
                 )
                 db.add(db_session)
 
         # 3. Handle Assignments
-        # ✅ CRITICAL FIX: Only create assignments if it is a PLAYER_PLAN.
-        # SQUAD_SESSIONs are owned by the coach and do NOT generate invites.
         if program_in.program_type == "PLAYER_PLAN":
             print("   -> Generating Player Assignments...")
             raw_targets = program_in.assigned_to
@@ -300,6 +357,18 @@ def create_program(
                     assigned_at=datetime.utcnow()
                 )
                 db.add(assignment)
+                
+                # Notification
+                if str(player_id) != str(current_user.id):
+                    notif = Notification(
+                        id=str(uuid.uuid4()),
+                        user_id=str(player_id),
+                        title="New Program Assigned",
+                        message=f"Coach assigned you a new program: {program_in.title}",
+                        type="PROGRAM_INVITE",
+                        reference_id=new_program.id
+                    )
+                    db.add(notif)
         else:
             print("   -> SQUAD_SESSION: Skipping assignments (Coach Only)")
 
@@ -312,6 +381,62 @@ def create_program(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
+
+# ✅ UPDATED: Delete Program with Notifications
+@router.delete("/programs/{program_id}")
+def delete_program(
+    program_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Try to find the program
+    program = db.query(Program).filter(Program.id == program_id).first()
+    
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    # Case A: User is the Coach/Creator -> Archive it & Notify Players
+    if program.creator_id == current_user.id:
+        
+        # 1. Find all active assignments to notify players
+        assignments = db.query(ProgramAssignment).filter(
+            ProgramAssignment.program_id == program_id,
+            ProgramAssignment.status != "ARCHIVED"
+        ).all()
+
+        for assignment in assignments:
+            # Don't notify self if testing
+            if assignment.player_id != current_user.id:
+                notif = Notification(
+                    id=str(uuid.uuid4()),
+                    user_id=assignment.player_id,
+                    title="Program Removed",
+                    message=f"Coach {current_user.name} has removed the program '{program.title}'.",
+                    type="PROGRAM_REMOVED",
+                    reference_id=None # No link needed as it's gone
+                )
+                db.add(notif)
+            
+            # Update status so it vanishes from their list too (if filters use assignment status)
+            assignment.status = "ARCHIVED"
+
+        # 2. Archive the Program itself
+        program.status = "ARCHIVED"
+        db.commit()
+        return {"status": "success", "message": "Program archived and players notified"}
+
+    # Case B: User is a Player assigned to it -> Remove Assignment
+    assignment = db.query(ProgramAssignment).filter(
+        ProgramAssignment.program_id == program_id,
+        ProgramAssignment.player_id == current_user.id
+    ).first()
+
+    if assignment:
+        db.delete(assignment)
+        db.commit()
+        return {"status": "success", "message": "Removed from your plans"}
+
+    raise HTTPException(status_code=403, detail="Not authorized to delete this program")
 
 @router.get("/my-active-program")
 def get_my_active_program(
@@ -421,11 +546,48 @@ def get_my_session_logs(current_user: User = Depends(get_current_user), db: Sess
     # Enrich with Drill Names using helper
     return enrich_logs_with_names(logs, db)
 
-@router.put("/my-profile")
-def update_my_profile(profile_data: UserUpdateSchema, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    current_user.goals = ",".join(profile_data.goals) 
+@router.put("/sessions/{session_id}/feedback")
+def update_session_feedback(
+    session_id: str,
+    feedback_data: SessionFeedbackUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can leave feedback.")
+        
+    session = db.query(SessionLog).filter(SessionLog.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found.")
+        
+    if feedback_data.feedback is not None:
+        session.coach_feedback = feedback_data.feedback
+    
+    if feedback_data.liked is not None:
+        session.coach_liked = feedback_data.liked
+        
     db.commit()
-    return {"status": "success", "goals": current_user.goals}
+    db.refresh(session)
+    return session
+
+@router.put("/my-profile")
+def update_my_profile(
+    profile_data: UserUpdateSchema, 
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    current_user.goals = ",".join(profile_data.goals)
+    
+    # ✅ Update Level if provided
+    if profile_data.level:
+        current_user.level = profile_data.level
+        
+    db.commit()
+    return {
+        "status": "success", 
+        "goals": current_user.goals, 
+        "level": current_user.level
+    }
 
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
@@ -445,37 +607,64 @@ def get_player_logs(
     return enrich_logs_with_names(logs, db)
 
 @router.get("/coach/activity")
-def get_coach_activity(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != "COACH":
-        return []
+def get_coach_activity(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Get all athletes linked to coach
+    athlete_ids = [u.id for u in db.query(User).filter(User.coach_id == current_user.id).all()]
+    # Get all athletes in coach's squads
+    squad_ids = [s.id for s in db.query(Squad).filter(Squad.coach_id == current_user.id).all()]
+    squad_athlete_ids = [m.player_id for m in db.query(SquadMember).filter(SquadMember.squad_id.in_(squad_ids)).all()]
     
-    players = db.query(User).filter(User.coach_id == current_user.id).all()
-    player_ids = [p.id for p in players]
-    
-    if not player_ids:
-        return []
+    all_ids = list(set(athlete_ids + squad_athlete_ids))
 
-    logs = db.query(SessionLog).options(joinedload(SessionLog.drill_performances)).filter(SessionLog.player_id.in_(player_ids)).order_by(desc(SessionLog.date_completed)).limit(20).all()
-    
-    # Enrich with Drill Names first
-    enriched_logs = enrich_logs_with_names(logs, db)
-    
-    # Add Player Names (Need to return dicts, not Pydantic models here since schema doesn't have player_name)
-    results = []
-    for log_model, original_log in zip(enriched_logs, logs):
-        player = next((p for p in players if p.id == original_log.player_id), None)
-        player_name = player.name if player else "Unknown Athlete"
+    # 1. Fetch Sessions (with drills joined!)
+    logs = db.query(SessionLog)\
+        .options(joinedload(SessionLog.drill_performances))\
+        .filter(SessionLog.player_id.in_(all_ids))\
+        .order_by(SessionLog.date_completed.desc())\
+        .limit(10).all()
         
-        # Convert back to dict to add extra field
-        log_dict = log_model.model_dump()
-        log_dict['player_name'] = player_name
-        results.append(log_dict)
+    # 2. Enrich Sessions (Add drill names)
+    enriched_logs = enrich_logs_with_names(logs, db)
 
-    return results
+    # 3. Fetch Matches
+    matches = db.query(MatchEntry).filter(MatchEntry.user_id.in_(all_ids)).order_by(MatchEntry.date.desc()).limit(10).all()
 
+    combined_activity = []
+    
+    # 4. Process Sessions
+    for log_model in enriched_logs:
+        # Dump the FULL object (drills, duration, etc.)
+        item = log_model.model_dump()
+        
+        # Add feed-specific fields
+        item['type'] = "SESSION"
+        item['title'] = "Completed Training"
+        item['date'] = item['date_completed'] # Normalize for sorting
+        
+        # Lookup Player Name
+        player_name = db.query(User.name).filter(User.id == item['player_id']).scalar()
+        item['player_name'] = player_name
+        
+        combined_activity.append(item)
+        
+    # 5. Process Matches
+    for m in matches:
+        combined_activity.append({
+            "id": m.id,
+            "type": "MATCH",
+            "player_name": db.query(User.name).filter(User.id == m.user_id).scalar(),
+            "opponent_name": m.opponent_name,
+            "event_name": m.event_name,
+            "date": m.date,
+            "score": m.score,
+            "result": m.result,
+            "user_id": m.user_id # Important for navigation
+        })
+
+    # Sort descending
+    combined_activity.sort(key=lambda x: x['date'], reverse=True)
+    return combined_activity[:15]
+# ✅ UPDATED: create_drill Now Saves All Fields
 @router.post("/drills")
 def create_drill(
     drill_data: DrillCreate,
@@ -490,7 +679,12 @@ def create_drill(
         name=drill_data.name,
         category=drill_data.category,
         difficulty=drill_data.difficulty,
-        description=drill_data.description
+        description=drill_data.description,
+        default_duration_min=drill_data.default_duration_min,
+        target_value=drill_data.target_value,
+        target_prompt=drill_data.target_prompt,
+        # ✅ Save Mode
+        drill_mode=drill_data.drill_mode 
     )
     db.add(new_drill)
     db.commit()
@@ -511,9 +705,9 @@ def get_session_logs(
     
     logs = (
         db.query(SessionLog)
-        .filter(SessionLog.user_id == target_id)
+        .filter(SessionLog.player_id == target_id) # ✅ FIXED (was .user_id)
         .options(joinedload(SessionLog.drill_performances))
-        .order_by(SessionLog.date.desc())
+        .order_by(SessionLog.date_completed.desc()) # ✅ FIXED (was .date)
         .all()
     )
     

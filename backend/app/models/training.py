@@ -26,6 +26,7 @@ class Drill(Base):
     target_value = Column(Integer, nullable=True)
     # target_prompt: e.g., "How many shots landed deep?"
     target_prompt = Column(String(255), nullable=True)
+    drill_mode = Column(String(50), default="Cooperative")
     
 class Program(Base):
     __tablename__ = "programs"
@@ -35,7 +36,7 @@ class Program(Base):
     description = Column(Text, nullable=True)
     creator_id = Column(String, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+    status = Column(String(50), default="ACTIVE")
     # ✅ NEW FIELDS
     program_type = Column(String(50), default="PLAYER_PLAN") # 'PLAYER_PLAN' or 'SQUAD_SESSION'
     squad_id = Column(String, nullable=True) # Linked Squad for Coach Programs
@@ -105,6 +106,10 @@ class SessionLog(Base):
     rpe = Column(Integer) 
     notes = Column(String, nullable=True)
     
+    # ✅ NEW FIELDS: Coach Interaction
+    coach_feedback = Column(Text, nullable=True)
+    coach_liked = Column(Boolean, default=False)
+    
     # Relationships
     player = relationship("User", back_populates="session_logs")
     program = relationship("Program")
@@ -134,3 +139,34 @@ class SquadAttendance(Base):
     # session_log_id = Column(String, ForeignKey("session_logs.id"), nullable=True)
 
     player = relationship("User")
+
+class MatchEntry(Base):
+    __tablename__ = "match_entries"
+
+    id = Column(String, primary_key=True, default=generate_id)
+    user_id = Column(String, ForeignKey("users.id"))
+    
+    # Match Details
+    date = Column(DateTime, default=datetime.utcnow)
+    event_name = Column(String(255))
+    opponent_name = Column(String(255))
+    round = Column(String(100), nullable=True)
+    
+    # ✅ NEW FIELDS (Added these)
+    match_format = Column(String(50), default="Singles") # Singles/Doubles
+    partner_name = Column(String(255), nullable=True)
+    surface = Column(String(50), nullable=True) # Clay, Hard, Grass
+    environment = Column(String(50), nullable=True) # Indoor/Outdoor
+    
+    # Pre-Match (Tactics Diary)
+    tactics = Column(Text, nullable=True)
+    
+    # Post-Match (Results Diary)
+    score = Column(String(100), nullable=True)
+    result = Column(String(50), nullable=True) # 'WIN' | 'LOSS' | 'DRAW'
+    reflection = Column(Text, nullable=True)
+    
+    # ✅ ADDED: Coach Feedback
+    coach_feedback = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

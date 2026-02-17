@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TextInput, ScrollView, 
   TouchableOpacity, Alert, ActivityIndicator, Platform, KeyboardAvoidingView
@@ -8,12 +8,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CommonActions } from '@react-navigation/native'; 
 import { 
   ChevronLeft, Check, Users, User, ChevronRight, 
-  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit
+  Wand2, Layers, Edit2, PlayCircle, RefreshCw, Trash2, Plus, Clock, ClipboardEdit, X 
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
-// ✅ Added fetchUserProfile
-import { fetchMyTeam, fetchDrills, createProgram, fetchSquads, fetchSessionLogs, fetchUserProfile } from '../services/api'; 
+import { fetchMyTeam, fetchDrills, createProgram, fetchSquads, fetchSessionLogs } from '../services/api'; 
 import { generateAIProgram, generateSquadProgram } from '../services/geminiService';
 
 import EditSessionModal from '../components/EditSessionModal';
@@ -27,11 +26,11 @@ const PREMADE_PROGRAMS = [
 ];
 
 export default function ProgramBuilderScreen({ navigation, route }) {
-  const { squadMode, initialPrompt, autoStart, autoGenerate, targetIds, passedUserProfile } = route.params || {};
-  const shouldAutoRun = autoStart || autoGenerate;
+  // ✅ Capture targetIds if passed from SquadDetail
+  const { squadMode, initialPrompt, autoStart, targetIds } = route.params || {};
 
-  const [step, setStep] = useState(shouldAutoRun ? 1 : 0); 
-  const [creationMethod, setCreationMethod] = useState(shouldAutoRun ? 'AI' : null);
+  const [step, setStep] = useState(autoStart ? 1 : 0); 
+  const [creationMethod, setCreationMethod] = useState(autoStart ? 'AI' : null);
   
   const [userRole, setUserRole] = useState('PLAYER'); 
   const [userId, setUserId] = useState(null);
@@ -40,9 +39,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [athletes, setAthletes] = useState([]);
   const [availableDrills, setAvailableDrills] = useState([]);
   const [squads, setSquads] = useState([]);
-  
-  // ✅ Store User Profile for AI Context
-  const [userProfile, setUserProfile] = useState(null);
 
   const [prompt, setPrompt] = useState(initialPrompt || '');
   const [durationWeeks, setDurationWeeks] = useState('4');
@@ -50,6 +46,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [numCourts, setNumCourts] = useState('1');
 
   const [draftProgram, setDraftProgram] = useState({ title: '', description: '', sessions: [] });
+  // ✅ Pre-select target if passed
   const [selectedTargets, setSelectedTargets] = useState(targetIds || []);
 
   const [editingSessionIndex, setEditingSessionIndex] = useState(null);
@@ -67,30 +64,18 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         if (id) setUserId(id);
 
         try {
-            // ✅ Fetch Profile along with other data
-            const [teamData, drillsData, squadsData, profileData] = await Promise.all([
+            const [teamData, drillsData, squadsData] = await Promise.all([
                 fetchMyTeam(), 
                 fetchDrills(),
-                fetchSquads(),
-                fetchUserProfile()
+                fetchSquads()
             ]);
             setAthletes(teamData || []);
             setAvailableDrills(drillsData || []);
             setSquads(squadsData || []); 
-            setUserProfile(profileData || {}); 
         } catch (e) { console.log("Data load error", e); }
     };
     init();
   }, []);
-
-  useEffect(() => {
-      if (shouldAutoRun && initialPrompt && availableDrills.length > 0) {
-          const timer = setTimeout(() => {
-              handleGenerate();
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [shouldAutoRun, availableDrills]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return Alert.alert("Required", "Please describe your goal.");
@@ -98,41 +83,24 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     setLoading(true);
     try {
         const historyLogs = await fetchSessionLogs();
-        const drillsToUse = availableDrills.length > 0 ? availableDrills : await fetchDrills();
+        const allDrills = await fetchDrills();
         
         let aiResult;
 
         if (squadMode) {
             aiResult = await generateSquadProgram(
                 `${prompt} (Duration: ${durationWeeks} weeks)`,
-                drillsToUse,
+                allDrills,
                 userId, 
                 { players: parseInt(numPlayers) || 4, courts: parseInt(numCourts) || 1 },
                 { weeks: parseInt(durationWeeks) || 4 }
             );
         } else {
-            const activeProfile = passedUserProfile || userProfile || {
-                id: userId,
-                role: userRole,
-                level: "Intermediate", 
-                goals: "General",
-                yearsExperience: 0
-            };
-
-            console.log("Generating for Profile:", activeProfile);
-
             aiResult = await generateAIProgram(
                 `${prompt} (Duration: ${durationWeeks} weeks)`,
-                drillsToUse,
-                { 
-                    id: userId, 
-                    role: userRole, 
-                    // ✅ Map backend fields to what geminiService expects
-                    level: activeProfile.level, 
-                    goals: activeProfile.goals,
-                    yearsExperience: activeProfile.years_experience || activeProfile.yearsExperience 
-                },
-                historyLogs, 
+                allDrills,
+                { id: userId, role: userRole, level: "Intermediate", goals: [] },
+                historyLogs,
                 { weeks: parseInt(durationWeeks) || 4 }
             );
         }
@@ -222,18 +190,27 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     setEditingSessionIndex(null);
   };
 
+  // ✅ CRITICAL: Correctly flag Squad Sessions & Fix Navigation
   const handleFinalize = async (targets) => {
     setLoading(true);
     try {
         const isSquadSession = squadMode === true;
-
+        
+        // Auto-detect Squad ID from targets if not explicit
+        const explicitSquadId = targets.find(tId => squads.some(sq => sq.id === tId));
+        
         const payload = {
             title: draftProgram.title,
             description: draftProgram.description || "",
             status: userRole === 'PLAYER' ? 'ACTIVE' : 'PENDING', 
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
+            
+            // ✅ Send Flags to Backend
             program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
-            squad_id: isSquadSession && targets.length > 0 ? targets[0] : null,
+            squad_id: isSquadSession 
+                ? (targets.length > 0 ? targets[0] : null) 
+                : (explicitSquadId || null),
+
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
@@ -257,8 +234,11 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         await createProgram(payload);
         setLoading(false);
         
+        // ✅ NAVIGATION FIX IS HERE
         if (isSquadSession) {
-             navigation.navigate('SquadDetail', { squad: { id: targets[0] } });
+             // REPLACE the current screen (Builder) with SquadDetail.
+             // This removes Builder from the history stack.
+             navigation.replace('SquadDetail', { squad: { id: targets[0] } });
         } else {
             const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
             navigation.dispatch(
@@ -269,10 +249,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             );
         }
         
-        setTimeout(() => {
-            Alert.alert("Success", isSquadSession ? "Squad Session Created!" : "Program Assigned!");
-        }, 500);
-
     } catch (e) {
         console.error("Save Error:", e);
         setLoading(false);
@@ -301,12 +277,14 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         <ChevronRight size={20} color="#CBD5E1" />
       </TouchableOpacity>
       
-      <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
-        <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
-        <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch.</Text></View>
-        <ChevronRight size={20} color="#CBD5E1" />
-      </TouchableOpacity>
-
+      {userRole !== 'PLAYER' && (
+        <TouchableOpacity style={styles.methodCard} onPress={handleManualStart}>
+            <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><ClipboardEdit size={28} color="#16A34A" /></View>
+            <View style={{flex: 1}}><Text style={styles.cardTitle}>Create Manually</Text><Text style={styles.cardDesc}>Build from scratch.</Text></View>
+            <ChevronRight size={20} color="#CBD5E1" />
+        </TouchableOpacity>
+      )}  
+    
       <TouchableOpacity style={styles.methodCard} onPress={() => { setCreationMethod('LIBRARY'); setStep(1); }}>
         <View style={[styles.iconBox, { backgroundColor: '#DBEAFE' }]}><Layers size={28} color="#2563EB" /></View>
         <View style={{flex: 1}}><Text style={styles.cardTitle}>Templates</Text><Text style={styles.cardDesc}>Choose pre-made plans.</Text></View>
@@ -350,7 +328,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         )}
 
         {creationMethod === 'AI' && (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => handleGenerate()} disabled={loading}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleGenerate} disabled={loading}>
                 {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Generate Plan</Text>}
             </TouchableOpacity>
         )}
@@ -403,12 +381,12 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                                 </View>
                                 {userRole !== 'PLAYER' && (
                                     <View style={{flexDirection: 'row', gap: 8}}>
-                                            <TouchableOpacity style={styles.editIconBtn} onPress={() => openDrillConfig(sIdx, dIdx, { ...item, drill_name: displayName })}>
-                                                <Edit2 size={16} color={COLORS.secondary} />
-                                            </TouchableOpacity>
-                                            <TouchableOpacity style={styles.deleteIconBtn} onPress={() => handleRemoveDrill(sIdx, dIdx)}>
-                                                <Trash2 size={16} color="#EF4444" />
-                                            </TouchableOpacity>
+                                        <TouchableOpacity style={styles.editIconBtn} onPress={() => openDrillConfig(sIdx, dIdx, { ...item, drill_name: displayName })}>
+                                            <Edit2 size={16} color={COLORS.secondary} />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={styles.deleteIconBtn} onPress={() => handleRemoveDrill(sIdx, dIdx)}>
+                                            <Trash2 size={16} color="#EF4444" />
+                                        </TouchableOpacity>
                                     </View>
                                 )}
                             </View>
@@ -477,7 +455,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const handleBack = () => {
     if (step === 3) setStep(2);
     else if (step === 2) setStep(1);
-    else if (step === 1 && !squadMode && !shouldAutoRun) setStep(0);
+    else if (step === 1 && !squadMode && !autoStart) setStep(0);
     else navigation.goBack();
   };
 
@@ -485,7 +463,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn}><ChevronLeft size={24} color="#0F172A" /></TouchableOpacity>
-        <Text style={styles.headerTitle}>Builder</Text><View style={{width: 24}} /> 
+        <Text style={styles.headerTitle}>Builder</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><X size={24} color="#64748B" /></TouchableOpacity> 
       </View>
       <View style={styles.content}>
         {step === 0 && renderStep0()}

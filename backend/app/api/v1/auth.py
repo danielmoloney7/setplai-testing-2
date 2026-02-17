@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from app.core.database import get_db
 from app.models.user import User
-from app.core.security import get_password_hash, verify_password, create_access_token, get_current_user # ✅ Import get_current_user
+from app.core.security import get_password_hash, verify_password, create_access_token, get_current_user 
 from pydantic import BaseModel
 from typing import Optional
 
 router = APIRouter()
 
+# Schema for Registration
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -18,14 +19,15 @@ class UserCreate(BaseModel):
     level: Optional[str] = "Beginner"
     goals: Optional[str] = None
 
-# ... (register and token endpoints remain the same) ...
 
 @router.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
+    # 1. Check if email exists
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # 2. Hash password and save
     hashed_pwd = get_password_hash(user.password)
     new_user = User(
         email=user.email, 
@@ -42,27 +44,38 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return {"message": "User created successfully", "id": new_user.id}
 
-@router.post("/token")
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+# --- UPDATED LOGIN ENDPOINT ---
+@router.post("/token")  # <--- Changed from "/login" to "/token"
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),  # <--- Handles "username" & "password" form data automatically
+    db: Session = Depends(get_db)
+):
+    # 1. Find user (OAuth2 spec uses 'username' field for email)
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
-    if not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+            
+            
+        )
     
+    # 2. Check password
+    if not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 3. Generate Token
     access_token = create_access_token(data={"sub": user.email, "role": user.role})
-    return {"access_token": access_token, "token_type": "bearer", "role": user.role, "name": user.name}
-
-# ✅ NEW: Get Current User Profile
-@router.get("/me")
-def read_users_me(current_user: User = Depends(get_current_user)):
+    
+    # 4. Return Token + User Info (Critical for Frontend Dashboard)
     return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "name": current_user.name,
-        "role": current_user.role,
-        "level": current_user.level,             # Critical for AI
-        "goals": current_user.goals,             # Critical for AI
-        "years_experience": current_user.years_experience, # Critical for AI
-        "xp": current_user.xp
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user.role,          # <--- Added for Dashboard
+        "name": user.email.split("@")[0] # <--- Simple name generator
     }

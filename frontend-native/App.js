@@ -1,33 +1,25 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';     
+import { NavigationContainer } from '@react-navigation/native';    
 import { createNativeStackNavigator } from '@react-navigation/native-stack'; 
-
-// Auth Screens
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
-
-// Main Navigation
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
-
-// Core Feature Screens
 import ProgramBuilderScreen from './src/screens/ProgramBuilderScreen';
 import SessionScreen from './src/screens/SessionScreen';
+import CoachActionScreen from './src/screens/CoachActionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import TeamScreen from './src/screens/TeamScreen';
+import DrillLibraryScreen from './src/screens/DrillLibraryScreen';
 import ProgramDetailScreen from './src/screens/ProgramDetailScreen';
 import AssessmentScreen from './src/screens/AssessmentScreen';
-
-// Team & Detail Screens
 import AthleteDetailScreen from './src/screens/AthleteDetailScreen';
 import SquadDetailScreen from './src/screens/SquadDetailScreen';
-
-// Session Management
 import SessionLogDetailScreen from './src/screens/SessionLogDetailScreen';
 import SessionSummaryScreen from './src/screens/SessionSummaryScreen';
-
-// ✅ NEW FEATURES
+import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
-import MatchListScreen from './src/screens/MatchListScreen';  // The List View
-import MatchDiaryScreen from './src/screens/MatchDiaryScreen'; // The Detail/Form View
+import MatchListScreen from './src/screens/MatchListScreen';
+import DrillDetailScreen from './src/screens/DrillDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -35,8 +27,7 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator initialRouteName="Login">
-
-        {/* --- AUTHENTICATION --- */}
+        
         <Stack.Screen 
           name="Login" 
           component={LoginScreen} 
@@ -48,15 +39,15 @@ export default function App() {
           component={RegisterScreen} 
           options={{ headerShown: false }} 
         />
-              
-        {/* --- MAIN APP (TABS) --- */}
+        
+        {/* REPLACED 'Dashboard' with 'Main' (The Tab Navigator) */}
         <Stack.Screen 
           name="Main" 
           component={BottomTabNavigator} 
           options={{ headerShown: false }} 
         />
 
-        {/* --- TRAINING FEATURES --- */}
+        {/* These screens sit ON TOP of the tabs (Full Screen) */}
         <Stack.Screen 
           name="ProgramBuilder" 
           component={ProgramBuilderScreen} 
@@ -70,15 +61,33 @@ export default function App() {
         />
 
         <Stack.Screen 
+          name="CoachAction" 
+          component={CoachActionScreen} 
+          options={{ headerShown: false, presentation: 'modal' }} // Nice modal effect
+        />
+
+        <Stack.Screen 
           name="Profile" 
           component={ProfileScreen} 
-          options={{ headerShown: false, presentation: 'modal' }} 
+          options={{ headerShown: false, presentation: 'modal' }} // Optional: 'modal' looks nice for profile
         />
+
+        {/* <Stack.Screen 
+          name="Team" 
+          component={TeamScreen} 
+          options={{ headerShown: false , presentation: 'modal'}} // Optional: 'modal' looks nice for profile
+        />
+
+        <Stack.Screen 
+          name="Drills" 
+          component={DrillLibraryScreen} 
+          options={{ headerShown: false, presentation: 'modal'}} // Optional: 'modal' looks nice for profile
+        /> */}
 
         <Stack.Screen 
           name="ProgramDetail" 
           component={ProgramDetailScreen} 
-          options={{ headerTitle: 'Program Details', headerBackTitle: 'Back' }} 
+          options={{ headerShown: false }} 
         />
 
         <Stack.Screen 
@@ -87,7 +96,6 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* --- TEAM & SQUAD MANAGEMENT --- */}
         <Stack.Screen 
           name="AthleteDetail" 
           component={AthleteDetailScreen} 
@@ -100,10 +108,10 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* --- SESSION LOGS --- */}
         <Stack.Screen 
           name="SessionLogDetail" 
           component={SessionLogDetailScreen} 
+          options={{ headerShown: false }}
         />
 
         <Stack.Screen 
@@ -112,26 +120,29 @@ export default function App() {
           options={{ headerShown: false }} 
         />
 
-        {/* --- ✅ NEW: NOTIFICATIONS --- */}
+        {/* ✅ 2. REGISTER MATCH DIARY */}
+        <Stack.Screen 
+          name="MatchDiary" 
+          component={MatchDiaryScreen} 
+          options={{ headerShown: false, presentation: 'modal' }}
+        />
+
         <Stack.Screen 
           name="Notifications" 
           component={NotificationsScreen} 
-          options={{ headerShown: false, presentation: 'modal' }} // Slide up effect
+          options={{ headerShown: false }}
         />
 
-        {/* --- ✅ NEW: MATCH DIARY --- */}
-        {/* 1. The LIST of matches (Opened from Dashboard) */}
         <Stack.Screen 
-          name="MatchDiary" 
+          name="MatchList" 
           component={MatchListScreen} 
-          options={{ headerShown: false }} 
+          options={{ headerShown: false }}
         />
 
-        {/* 2. The FORM/DETAIL view (Opened from List or Notifications) */}
         <Stack.Screen 
-          name="MatchDetail" 
-          component={MatchDiaryScreen} 
-          options={{ headerShown: false, presentation: 'modal' }} 
+          name="DrillDetail" 
+          component={DrillDetailScreen} 
+          options={{ headerShown: false }} 
         />
 
       </Stack.Navigator>

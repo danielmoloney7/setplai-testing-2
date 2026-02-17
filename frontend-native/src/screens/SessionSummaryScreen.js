@@ -157,22 +157,6 @@ export default function SessionSummaryScreen({ navigation, route }) {
             );
         })}
 
-        {/* DATA DEBUGGER (Remove after fixing) */}
-        <View style={styles.debugSection}>
-            <View style={{flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8}}>
-                <Bug size={16} color="#475569" />
-                <Text style={styles.debugTitle}>Data Debugger</Text>
-            </View>
-            <Text style={styles.debugText}>
-                Total Drills Logged: {logs.drill_performances?.length || 0}
-            </Text>
-            {logs.drill_performances?.map((p, i) => (
-                <Text key={i} style={styles.debugItem}>
-                   #{i+1}: {p.drill_id} | {p.drill_name} | {p.outcome}
-                </Text>
-            ))}
-        </View>
-
       </ScrollView>
     </SafeAreaView>
   );

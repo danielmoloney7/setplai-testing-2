@@ -1,11 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native'; // ✅ Added Hook
-import { Clock, Activity, ThumbsUp, ThumbsDown, Calendar } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native'; 
+// ✅ FIX: Added 'Heart' to imports
+import { Clock, Activity, ThumbsUp, ThumbsDown, Calendar, Heart } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function FeedCard({ session }) {
-  const navigation = useNavigation(); // ✅ Initialize Navigation
+  const navigation = useNavigation();
 
   // Format Date & Time safely
   const dateObj = new Date(session.date_completed || session.created_at || Date.now());
@@ -16,7 +17,6 @@ export default function FeedCard({ session }) {
   const nailedCount = session.drill_performances?.filter(p => p.outcome === 'success').length || 0;
   const struggleCount = session.drill_performances?.filter(p => p.outcome === 'fail').length || 0;
 
-  // ✅ Handle Click -> Navigate to Details
   const handlePress = () => {
     navigation.navigate('SessionLogDetail', { sessionLog: session });
   };
@@ -54,8 +54,16 @@ export default function FeedCard({ session }) {
           <Activity size={14} color="#64748B" />
           <Text style={styles.statText}>RPE {session.rpe || '-'}/10</Text>
         </View>
+      
+        {/* ✅ Coach Like Badge */}
+        {session.coach_liked && (
+          <View style={[styles.pill, { backgroundColor: '#FCE7F3', marginLeft: 8 }]}>
+              <Heart size={12} color="#DB2777" fill="#DB2777" />
+              <Text style={[styles.pillText, { color: '#DB2777' }]}>Coach Liked</Text>
+          </View>
+        )}
         
-        {/* Feedback Counts (Only show if data exists) */}
+        {/* Feedback Counts */}
         {(nailedCount > 0 || struggleCount > 0) && (
             <View style={styles.feedbackContainer}>
                 {nailedCount > 0 && (
@@ -94,7 +102,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    ...SHADOWS.small, // Ensure SHADOWS is defined in your theme
+    ...SHADOWS.small, 
   },
   header: {
     flexDirection: 'row',

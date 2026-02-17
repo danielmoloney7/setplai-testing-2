@@ -6,7 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon } from 'lucide-react-native';
+import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon, X, BarChart } from 'lucide-react-native'; // ✅ Added BarChart
 import { COLORS, SHADOWS } from '../constants/theme';
 import { updateProfile, fetchUserProfile } from '../services/api';
 
@@ -32,11 +32,11 @@ export default function ProfileScreen({ navigation }) {
     try {
         const data = await fetchUserProfile();
         if (data) {
-            // Normalize role to uppercase for consistent checking
             const normalizedUser = {
                 ...data,
-                role: (data.role || 'PLAYER').toUpperCase(),
-                goals: typeof data.goals === 'string' ? data.goals.split(',') : (data.goals || [])
+                goals: Array.isArray(data.goals) 
+                    ? data.goals 
+                    : (data.goals ? data.goals.split(',') : [])
             };
             setUser(normalizedUser);
         }
@@ -51,15 +51,23 @@ export default function ProfileScreen({ navigation }) {
 
   // Handle Updates
   const handleUpdate = async (updates) => {
-    // Optimistic UI Update
+    // 1. Optimistic UI Update (Updates screen immediately)
     setUser(prev => ({ ...prev, ...updates }));
-    
-    // API Call
+    const payload = {
+        goals: updates.goals || user.goals,
+        level: updates.level || user.level
+    };
+
+    // 2. API Call
     if (updates.goals || updates.level) {
         try {
-            await updateProfile(updates.goals || user.goals); // Simplified update for now
+            await updateProfile({
+                goals: updates.goals || user.goals,
+                level: updates.level || user.level 
+            });
         } catch(e) {
             Alert.alert("Error", "Could not save profile changes.");
+            loadUser(); // Revert on error
         }
     }
   };
@@ -85,6 +93,13 @@ export default function ProfileScreen({ navigation }) {
 
   const renderHeader = () => (
     <View style={styles.header}>
+      <TouchableOpacity 
+        style={styles.closeBtn} 
+        onPress={() => navigation.goBack()}
+      >
+        <X size={24} color="#64748B" />
+      </TouchableOpacity>
+
       <View style={styles.avatarContainer}>
         <Text style={styles.avatarText}>{user.name ? user.name[0].toUpperCase() : 'U'}</Text>
       </View>
@@ -96,7 +111,13 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.roleText}>{user.role}</Text>
           </View>
 
-          {/* ✅ XP Badge (PLAYER ONLY) */}
+          {/* ✅ Level Badge (New) */}
+          <View style={[styles.roleBadge, { backgroundColor: '#E0F2FE' }]}>
+            <BarChart size={12} color="#0284C7" style={{marginRight:4}}/>
+            <Text style={[styles.roleText, { color: '#0284C7' }]}>{user.level || 'Intermediate'}</Text>
+          </View>
+
+          {/* XP Badge (PLAYER ONLY) */}
           {user.role === 'PLAYER' && (
             <View style={[styles.roleBadge, { backgroundColor: '#FEF9C3' }]}>
                 <Trophy size={12} color="#CA8A04" style={{marginRight:4}}/>
@@ -144,7 +165,7 @@ export default function ProfileScreen({ navigation }) {
         <View style={styles.goalsContainer}>
           {COMMON_GOALS.map(goal => {
             const isSelected = user.goals?.includes(goal);
-            if (!isEditing && !isSelected) return null; // Hide unselected when not editing
+            if (!isEditing && !isSelected) return null; 
 
             return (
               <TouchableOpacity 
@@ -189,10 +210,8 @@ export default function ProfileScreen({ navigation }) {
         
         {renderHeader()}
 
-        {/* ✅ CONDITIONAL RENDER: Only Players see gamification/goals */}
         {user.role === 'PLAYER' && renderPlayerSettings()}
 
-        {/* Coach Empty State */}
         {user.role === 'COACH' && (
             <View style={styles.emptyContainer}>
                 <UserIcon size={48} color="#CBD5E1" />
@@ -271,5 +290,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, 
     marginTop: 32, padding: 16, backgroundColor: '#FEF2F2', borderRadius: 16 
   },
-  logoutText: { color: '#EF4444', fontWeight: '700', fontSize: 16 }
+  logoutText: { color: '#EF4444', fontWeight: '700', fontSize: 16 },
+
+  closeBtn: {
+    position: 'absolute',
+    top: 0,
+    right: 24,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    zIndex: 10
+  },
 });
