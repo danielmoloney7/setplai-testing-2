@@ -19,8 +19,8 @@ export default function PlansScreen({ navigation }) {
   const loadData = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-        // ✅ 1. Get User Name for comparison
-        const userName = await AsyncStorage.getItem('user_name');
+        // ✅ 1. Get User ID for robust comparison
+        const userId = await AsyncStorage.getItem('user_id');
 
         const [dbPrograms, dbLogs] = await Promise.all([
             fetchPrograms(),
@@ -43,18 +43,16 @@ export default function PlansScreen({ navigation }) {
             const progress = totalSessions > 0 ? (completedCount / totalSessions) * 100 : 0;
             const isFinished = totalSessions > 0 && completedCount >= totalSessions;
 
-            // ✅ 2. Fix Logic: Check if coach_name is NOT the current user
-            const isCoachAssigned = program.coach_name && 
-                                    program.coach_name !== 'System' && 
-                                    program.coach_name !== 'Self-Guided' &&
-                                    program.coach_name !== userName;
+            // ✅ 2. Fix Logic: Compare creator_id with current userId
+            const isCoachAssigned = program.creator_id && 
+                                    program.creator_id !== userId;
 
             const enriched = { 
                 ...program, 
                 progress, 
                 completedCount, 
                 totalSessions,
-                isCoachAssigned // Use the fixed boolean
+                isCoachAssigned 
             };
 
             if (program.status === 'PENDING') {
@@ -128,7 +126,6 @@ export default function PlansScreen({ navigation }) {
                     </View>
                 ) : !isCompleted && (
                     <View style={styles.playerBadge}>
-                        {/* ✅ 3. Update Text Label */}
                         <Text style={styles.playerBadgeText}>PLAYER ASSIGNED</Text>
                     </View>
                 )}

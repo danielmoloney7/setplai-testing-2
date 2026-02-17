@@ -36,7 +36,7 @@ class Program(Base):
     description = Column(Text, nullable=True)
     creator_id = Column(String, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+    status = Column(String(50), default="ACTIVE")
     # ✅ NEW FIELDS
     program_type = Column(String(50), default="PLAYER_PLAN") # 'PLAYER_PLAN' or 'SQUAD_SESSION'
     squad_id = Column(String, nullable=True) # Linked Squad for Coach Programs

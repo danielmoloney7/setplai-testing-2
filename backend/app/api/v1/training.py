@@ -85,6 +85,8 @@ class UserResponse(BaseModel):
     email: str
     role: str
     xp: int = 0
+    level: Optional[str] = None
+    goals: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -182,12 +184,18 @@ def get_programs(
     try:
         # Fetch logic
         if "COACH" in current_user.role.upper():
-            programs = db.query(Program).filter(Program.creator_id == current_user.id).all()
+            programs = db.query(Program).filter(
+                Program.creator_id == current_user.id,
+                Program.status != "ARCHIVED"  # ✅ ADD THIS FILTER
+            ).all()
         else:
             programs = (
                 db.query(Program)
                 .join(ProgramAssignment, Program.id == ProgramAssignment.program_id)
-                .filter(ProgramAssignment.player_id == current_user.id)
+                .filter(
+                    ProgramAssignment.player_id == current_user.id,
+                    Program.status != "ARCHIVED" # ✅ Ensure players don't see deleted plans
+                )
                 .all()
             )
         
@@ -251,6 +259,7 @@ def get_programs(
         return results
     except Exception as e:
         print(f"Error fetching programs: {e}")
+        return []
 
 @router.post("/programs")
 def create_program(
@@ -287,7 +296,8 @@ def create_program(
             created_at=datetime.utcnow(),
             # ✅ Save the detected or provided Squad ID
             program_type=program_in.program_type, 
-            squad_id=final_squad_id 
+            squad_id=final_squad_id,
+            status="ACTIVE" 
         )
         db.add(new_program)
         db.commit()
@@ -372,6 +382,7 @@ def create_program(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
+# ✅ UPDATED: Delete Program with Notifications
 @router.delete("/programs/{program_id}")
 def delete_program(
     program_id: str,
@@ -381,11 +392,38 @@ def delete_program(
     # Try to find the program
     program = db.query(Program).filter(Program.id == program_id).first()
     
-    # Case A: User is the Coach/Creator -> Archive it
-    if program and program.creator_id == current_user.id:
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    # Case A: User is the Coach/Creator -> Archive it & Notify Players
+    if program.creator_id == current_user.id:
+        
+        # 1. Find all active assignments to notify players
+        assignments = db.query(ProgramAssignment).filter(
+            ProgramAssignment.program_id == program_id,
+            ProgramAssignment.status != "ARCHIVED"
+        ).all()
+
+        for assignment in assignments:
+            # Don't notify self if testing
+            if assignment.player_id != current_user.id:
+                notif = Notification(
+                    id=str(uuid.uuid4()),
+                    user_id=assignment.player_id,
+                    title="Program Removed",
+                    message=f"Coach {current_user.name} has removed the program '{program.title}'.",
+                    type="PROGRAM_REMOVED",
+                    reference_id=None # No link needed as it's gone
+                )
+                db.add(notif)
+            
+            # Update status so it vanishes from their list too (if filters use assignment status)
+            assignment.status = "ARCHIVED"
+
+        # 2. Archive the Program itself
         program.status = "ARCHIVED"
         db.commit()
-        return {"status": "success", "message": "Program archived"}
+        return {"status": "success", "message": "Program archived and players notified"}
 
     # Case B: User is a Player assigned to it -> Remove Assignment
     assignment = db.query(ProgramAssignment).filter(
@@ -667,9 +705,9 @@ def get_session_logs(
     
     logs = (
         db.query(SessionLog)
-        .filter(SessionLog.user_id == target_id)
+        .filter(SessionLog.player_id == target_id) # ✅ FIXED (was .user_id)
         .options(joinedload(SessionLog.drill_performances))
-        .order_by(SessionLog.date.desc())
+        .order_by(SessionLog.date_completed.desc()) # ✅ FIXED (was .date)
         .all()
     )
     

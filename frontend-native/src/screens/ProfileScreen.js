@@ -34,8 +34,9 @@ export default function ProfileScreen({ navigation }) {
         if (data) {
             const normalizedUser = {
                 ...data,
-                role: (data.role || 'PLAYER').toUpperCase(),
-                goals: typeof data.goals === 'string' ? data.goals.split(',') : (data.goals || [])
+                goals: Array.isArray(data.goals) 
+                    ? data.goals 
+                    : (data.goals ? data.goals.split(',') : [])
             };
             setUser(normalizedUser);
         }
@@ -56,7 +57,7 @@ export default function ProfileScreen({ navigation }) {
         goals: updates.goals || user.goals,
         level: updates.level || user.level
     };
-    
+
     // 2. API Call
     if (updates.goals || updates.level) {
         try {

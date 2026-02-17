@@ -451,10 +451,7 @@ export default function DashboardScreen({ navigation }) {
                 <View style={styles.upNextHeader}>
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
                     
-                    {sessionItem.coachName && 
-                     sessionItem.coachName !== 'Self-Guided' && 
-                     sessionItem.coachName !== 'System' && 
-                     sessionItem.coachName !== user.name ? (
+                    {sessionItem.creatorId && sessionItem.creatorId !== user.id ? (
                         <View style={[styles.planBadge, { backgroundColor: '#7C3AED' }]}>
                             <Text style={[styles.planBadgeText, { color: '#FFF' }]}>COACH ASSIGNED</Text>
                         </View>

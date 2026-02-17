@@ -57,10 +57,10 @@ export default function FeedCard({ session }) {
       
         {/* ✅ Coach Like Badge */}
         {session.coach_liked && (
-            <View style={[styles.pill, { backgroundColor: '#FCE7F3', marginLeft: 8 }]}>
-                <Heart size={12} color="#DB2777" fill="#DB2777" />
-                <Text style={[styles.pillText, { color: '#DB2777' }]}>Coach Liked</Text>
-            </View>
+          <View style={[styles.pill, { backgroundColor: '#FCE7F3', marginLeft: 8 }]}>
+              <Heart size={12} color="#DB2777" fill="#DB2777" />
+              <Text style={[styles.pillText, { color: '#DB2777' }]}>Coach Liked</Text>
+          </View>
         )}
         
         {/* Feedback Counts */}

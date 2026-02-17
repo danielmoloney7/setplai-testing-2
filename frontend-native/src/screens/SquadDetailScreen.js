@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Modal, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { ChevronLeft, Edit2, Play, Check, Clock, Dumbbell, UserCheck } from 'lucide-react-native';
+import { ChevronLeft, Edit2, Play, Check, Clock, Dumbbell, UserCheck, Plus, Trash2, X, Search } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { 
     fetchPrograms, 
@@ -10,7 +10,10 @@ import {
     fetchSquadMembers, 
     fetchPlayerLogs, 
     fetchSquadLeaderboard, 
-    markSquadAttendance 
+    markSquadAttendance,
+    fetchMyAthletes,      // ✅ Added
+    addMemberToSquad,     // ✅ Added
+    removeMemberFromSquad // ✅ Added
 } from '../services/api';
 
 export default function SquadDetailScreen({ navigation, route }) {
@@ -20,10 +23,12 @@ export default function SquadDetailScreen({ navigation, route }) {
   
   // Data State
   const [members, setMembers] = useState([]);
+  const [allAthletes, setAllAthletes] = useState([]); // ✅ Store all coach athletes
   const [leaderboard, setLeaderboard] = useState([]);
   
-  // Attendance State
+  // Modals State
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false); // ✅ Manage Squad Modal
   const [selectedForAttendance, setSelectedForAttendance] = useState([]);
   const [isSessionLaunch, setIsSessionLaunch] = useState(false); 
 
@@ -43,22 +48,22 @@ export default function SquadDetailScreen({ navigation, route }) {
     try {
         const lbPromise = typeof fetchSquadLeaderboard === 'function' ? fetchSquadLeaderboard(squad.id) : Promise.resolve([]);
 
-        const [allPrograms, myLogs, squadMembers, lbData] = await Promise.all([
+        const [allPrograms, myLogs, squadMembers, lbData, myRoster] = await Promise.all([
             fetchPrograms(),
             fetchSessionLogs(),
             fetchSquadMembers(squad.id),
-            lbPromise
+            lbPromise,
+            fetchMyAthletes() // ✅ Fetch full roster for adding members
         ]);
 
         const memberList = squadMembers || [];
         setMembers(memberList);
+        setAllAthletes(myRoster || []);
         setLeaderboard(lbData || []);
         
         setSelectedForAttendance(memberList.map(m => m.id));
 
-        // ------------------------------------------------------
-        // 1. SQUAD PROGRAM (Coach-Led Sessions)
-        // ------------------------------------------------------
+        // ... (Existing Program Logic - Kept Same) ...
         const activeSquadProgram = allPrograms
             .filter(p => p.program_type === 'SQUAD_SESSION' && p.squad_id === squad.id && p.status !== 'ARCHIVED')
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
@@ -82,61 +87,38 @@ export default function SquadDetailScreen({ navigation, route }) {
             }
         }
 
-        // ------------------------------------------------------
-        // 2. PLAYER PROGRAM (The "Team Plan")
-        // ------------------------------------------------------
-        // Logic: Must be PLAYER_PLAN type AND explicitly assigned to the Squad ID
-        
         const activePlayerProgram = allPrograms
             .filter(p => {
-                const isPlayerPlan = p.program_type === 'PLAYER_PLAN' || !p.program_type; // Default to player plan if null
+                const isPlayerPlan = p.program_type === 'PLAYER_PLAN' || !p.program_type;
                 if (!isPlayerPlan || p.status === 'ARCHIVED') return false;
-
-                // Check 1: Is the 'squad_id' field set on the program row?
                 if (p.squad_id === squad.id) return true;
-
-                // Check 2: Is the squad ID inside the 'assigned_to' array?
-                // assigned_to can be array of strings ["squad_123"] or objects [{id: "squad_123"}]
-                const isAssignedDirectly = p.assigned_to?.some(target => {
+                return p.assigned_to?.some(target => {
                     const targetId = typeof target === 'string' ? target : target.id;
                     return targetId === squad.id;
                 });
-
-                return isAssignedDirectly;
             })
-            // If multiple exist, take the most recently created one
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
 
         if (activePlayerProgram) {
             setPlayerProgram(activePlayerProgram);
-            
             if (memberList.length > 0) {
-                // Calculate unique session days in the program
                 const totalPlayerSessions = activePlayerProgram.schedule ? new Set(activePlayerProgram.schedule.map(s => s.day_order)).size : 0;
-                
-                // Calculate stats for each member against THIS program only
                 const stats = await Promise.all(memberList.map(async (member) => {
                     try {
                         const memberAllLogs = await fetchPlayerLogs(member.id); 
-                        
-                        // Strict Filter: Only count logs for this specific program ID
                         const relevantLogs = memberAllLogs.filter(l => l.program_id === activePlayerProgram.id);
-                        
                         const uniqueSessionsDone = new Set(relevantLogs.map(l => l.session_id)).size;
                         const prog = totalPlayerSessions > 0 ? (uniqueSessionsDone / totalPlayerSessions) * 100 : 0;
-                        
                         return { ...member, logCount: uniqueSessionsDone, progress: Math.min(prog, 100) };
                     } catch (e) { 
                         return { ...member, logCount: 0, progress: 0 }; 
                     }
                 }));
-                
                 setPlayerStats(stats);
                 const totalProg = stats.reduce((acc, s) => acc + s.progress, 0);
                 setAggPlayerProgress(stats.length > 0 ? totalProg / stats.length : 0);
             }
         } else {
-            // No team plan found
             setPlayerProgram(null);
             setPlayerStats(memberList.map(m => ({ ...m, logCount: 0, progress: 0 })));
             setAggPlayerProgress(0);
@@ -152,13 +134,35 @@ export default function SquadDetailScreen({ navigation, route }) {
 
   useFocusEffect(useCallback(() => { loadData(); }, [squad]));
 
-  // --- ACTIONS ---
+  // --- MEMBER MANAGEMENT ---
+  const handleAddMember = async (playerId) => {
+      try {
+          await addMemberToSquad(squad.id, playerId);
+          // Refresh list locally
+          const addedPlayer = allAthletes.find(a => a.id === playerId);
+          if (addedPlayer) setMembers(prev => [...prev, addedPlayer]);
+          Alert.alert("Success", "Player added to squad.");
+      } catch (e) {
+          Alert.alert("Error", "Could not add player.");
+      }
+  };
 
+  const handleRemoveMember = async (playerId) => {
+      try {
+          await removeMemberFromSquad(squad.id, playerId);
+          setMembers(prev => prev.filter(m => m.id !== playerId));
+          Alert.alert("Removed", "Player removed from squad.");
+      } catch (e) {
+          Alert.alert("Error", "Could not remove player.");
+      }
+  };
+
+  const availableAthletes = allAthletes.filter(a => !members.some(m => m.id === a.id));
+
+  // --- ACTIONS ---
   const handleSubmitAttendance = async () => {
       try {
-          if (typeof markSquadAttendance !== 'function') throw new Error("API not updated");
           await markSquadAttendance(squad.id, selectedForAttendance);
-          
           if (isSessionLaunch) {
               setShowAttendanceModal(false);
               setIsSessionLaunch(false);
@@ -185,27 +189,12 @@ export default function SquadDetailScreen({ navigation, route }) {
     setShowAttendanceModal(true);
   };
 
-  const handleCreateSquadProgram = () => {
-    // Navigates to builder in 'Squad Mode' but for assigning a plan
-    navigation.navigate('ProgramBuilder', { 
-        squadMode: true, // This ensures it associates with the squad
-        initialPrompt: `Create a training plan for ${squad?.name}`, 
-        autoStart: false, 
-        targetIds: [squad.id] // Pre-selects this squad ID
-    });
-  };
-
   const toggleAttendance = (id) => {
       if (selectedForAttendance.includes(id)) {
           setSelectedForAttendance(prev => prev.filter(i => i !== id));
       } else {
           setSelectedForAttendance(prev => [...prev, id]);
       }
-  };
-
-  const handleCancelAttendance = () => {
-      setShowAttendanceModal(false);
-      setIsSessionLaunch(false); 
   };
 
   if (!squad) return null;
@@ -217,7 +206,6 @@ export default function SquadDetailScreen({ navigation, route }) {
 
   const renderOverview = () => (
       <>
-        {/* 1. COACH-LED SECTION */}
         <Text style={styles.sectionLabel}>SQUAD SESSION (COACH LED)</Text>
         {squadProgram ? (
             nextCoachSession ? (
@@ -252,16 +240,12 @@ export default function SquadDetailScreen({ navigation, route }) {
             </TouchableOpacity>
         )}
 
-        {/* 2. STATS GRID */}
         <View style={styles.statsGrid}>
-            {/* Left: Coach Progress */}
             <View style={styles.statCard}>
                 <Text style={[styles.bigPercent, { color: '#10B981' }]}>{Math.round(coachProgress)}%</Text>
                 <Text style={styles.statLabel}>COACH EXECUTION</Text>
                 <View style={styles.miniBarBg}><View style={[styles.miniBarFill, { width: `${coachProgress}%`, backgroundColor: '#10B981' }]} /></View>
             </View>
-            
-            {/* Right: Player Progress (Aggregated from Team Plan) */}
             <View style={styles.statCard}>
                 <Text style={[styles.bigPercent, { color: '#3B82F6' }]}>{Math.round(aggPlayerProgress)}%</Text>
                 <Text style={styles.statLabel}>PLAYER COMPLETION</Text>
@@ -269,10 +253,8 @@ export default function SquadDetailScreen({ navigation, route }) {
             </View>
         </View>
 
-        {/* 3. PLAYER PROGRESS LIST */}
         <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
-            <Text style={styles.sectionLabel}>PLAYER PROGRESS {playerProgram ? `(${playerProgram.title})` : ''}</Text>
-            {/* Button to assign a player plan to the squad */}
+            <Text style={styles.sectionLabel}>PLAYER PROGRESS</Text>
             {!playerProgram && (
                 <TouchableOpacity onPress={() => navigation.navigate('ProgramBuilder', { squadMode: false, targetIds: [squad.id] })}>
                     <Text style={{fontSize: 12, color: COLORS.primary, fontWeight: '700'}}>+ Assign Plan</Text>
@@ -310,7 +292,6 @@ export default function SquadDetailScreen({ navigation, route }) {
               <Text style={styles.lbHeaderCell}>Sessions</Text>
               <Text style={styles.lbHeaderCell}>Score</Text>
           </View>
-          
           {leaderboard.length > 0 ? (
               leaderboard.map((item, index) => (
                   <View key={item.player_id} style={styles.lbRow}>
@@ -327,7 +308,7 @@ export default function SquadDetailScreen({ navigation, route }) {
                   </View>
               ))
           ) : <Text style={styles.emptyText}>No data yet.</Text>}
-
+          
           <TouchableOpacity style={styles.attendanceBtn} onPress={() => { setIsSessionLaunch(false); setShowAttendanceModal(true); }}>
               <UserCheck size={20} color="#FFF" />
               <Text style={styles.attendanceBtnText}>Mark Attendance</Text>
@@ -340,9 +321,10 @@ export default function SquadDetailScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><ChevronLeft size={24} color="#0F172A" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Squad Profile</Text>
-        <View style={{flexDirection: 'row', gap: 12}}>
-            <TouchableOpacity style={styles.iconBtn}><Edit2 size={20} color="#64748B"/></TouchableOpacity>
-        </View>
+        {/* ✅ Edit Button now opens Manage Modal */}
+        <TouchableOpacity style={styles.iconBtn} onPress={() => setShowManageModal(true)}>
+            <Edit2 size={20} color="#64748B"/>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.tabRow}>
@@ -359,9 +341,42 @@ export default function SquadDetailScreen({ navigation, route }) {
             <Text style={styles.squadName}>{squad.name}</Text>
             <Text style={styles.squadSub}>{squad.level || 'General'} • {members.length} Members</Text>
         </View>
-
         {activeTab === 'OVERVIEW' ? renderOverview() : renderLeaderboard()}
       </ScrollView>
+
+      {/* ✅ MEMBER MANAGEMENT MODAL */}
+      <Modal visible={showManageModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16}}>
+                      <Text style={styles.modalTitle}>Manage Squad</Text>
+                      <TouchableOpacity onPress={() => setShowManageModal(false)}><X size={24} color="#64748B"/></TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.sectionLabel}>CURRENT MEMBERS</Text>
+                  <ScrollView style={{maxHeight: 150, marginBottom: 16}}>
+                      {members.length > 0 ? members.map(m => (
+                          <View key={m.id} style={styles.checkRow}>
+                              <Text style={styles.checkName}>{m.name}</Text>
+                              <TouchableOpacity onPress={() => handleRemoveMember(m.id)}>
+                                  <Trash2 size={18} color="#EF4444" />
+                              </TouchableOpacity>
+                          </View>
+                      )) : <Text style={styles.emptyText}>No members.</Text>}
+                  </ScrollView>
+
+                  <Text style={styles.sectionLabel}>ADD ATHLETES</Text>
+                  <ScrollView style={{maxHeight: 200}}>
+                      {availableAthletes.length > 0 ? availableAthletes.map(a => (
+                          <TouchableOpacity key={a.id} style={styles.checkRow} onPress={() => handleAddMember(a.id)}>
+                              <Text style={styles.checkName}>{a.name}</Text>
+                              <Plus size={20} color={COLORS.primary} />
+                          </TouchableOpacity>
+                      )) : <Text style={styles.emptyText}>No other athletes available.</Text>}
+                  </ScrollView>
+              </View>
+          </View>
+      </Modal>
 
       {/* ATTENDANCE MODAL */}
       <Modal visible={showAttendanceModal} transparent animationType="slide">
@@ -382,7 +397,7 @@ export default function SquadDetailScreen({ navigation, route }) {
                   </ScrollView>
 
                   <View style={{flexDirection: 'row', gap: 12}}>
-                      <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelAttendance}>
+                      <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowAttendanceModal(false); setIsSessionLaunch(false); }}>
                           <Text style={styles.cancelText}>Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
@@ -436,7 +451,7 @@ const styles = StyleSheet.create({
   attendanceBtnText: { color: '#FFF', fontWeight: '700' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
-  modalContent: { backgroundColor: '#FFF', borderRadius: 24, padding: 24 },
+  modalContent: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, maxHeight: '80%' },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
   modalSub: { fontSize: 14, color: '#64748B', marginBottom: 12 },
   checkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
