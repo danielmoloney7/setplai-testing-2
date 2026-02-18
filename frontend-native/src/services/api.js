@@ -371,4 +371,14 @@ export const respondToCoachRequest = async (playerId, action) => {
   }
 };
 
+export const disconnectCoach = async () => {
+  try {
+    const response = await api.post('/disconnect-coach');
+    return response.data;
+  } catch (error) {
+    console.error("Disconnect Error:", error);
+    throw error;
+  }
+};
+
 export default api;

@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  RefreshControl, Alert, Modal, TextInput, ActivityIndicator
+  RefreshControl, Alert, Modal, TextInput, ActivityIndicator, Platform 
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Link as LinkIcon, Check, Zap, Target, Trophy, User as UserIcon, X, BarChart, UserPlus, Copy, Clock } from 'lucide-react-native';
+import { LogOut, Check, Zap, Target, Trophy, User as UserIcon, X, BarChart, UserPlus, Copy, Clock, Trash2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { updateProfile, fetchUserProfile, requestCoach, fetchCoachRequests, respondToCoachRequest } from '../services/api';
+import { updateProfile, fetchUserProfile, requestCoach, fetchCoachRequests, respondToCoachRequest, disconnectCoach } from '../services/api';
 
 const COMMON_GOALS = ['Improve Serve', 'Consistency', 'Strategy', 'Fitness', 'Mental Game', 'Power', 'Footwork'];
 const SKILL_LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
@@ -67,23 +67,18 @@ export default function ProfileScreen({ navigation }) {
 
   useFocusEffect(useCallback(() => { loadUser(); }, []));
 
-  // Handle Updates (Level & Goals)
+  // Handle Updates
   const handleUpdate = async (updates) => {
-    // 1. Optimistic Update
     setUser(prev => ({ ...prev, ...updates }));
-    
-    // 2. Prepare Payload
     const payload = {
         goals: updates.goals || user.goals,
         level: updates.level || user.level
     };
-
-    // 3. API Call
     try {
         await updateProfile(payload);
     } catch(e) {
         Alert.alert("Error", "Could not save profile changes.");
-        loadUser(); // Revert on error
+        loadUser();
     }
   };
 
@@ -96,7 +91,7 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  // ✅ Player: Submit Code
+  // ✅ Player: Request Coach
   const handleRequestCoach = async () => {
       if(!coachCodeInput.trim() || coachCodeInput.length !== 6) {
           Alert.alert("Invalid Code", "Please enter a 6-digit code.");
@@ -107,11 +102,52 @@ export default function ProfileScreen({ navigation }) {
           await requestCoach(coachCodeInput);
           Alert.alert("Success", "Request sent! Waiting for coach approval.");
           setShowLinkModal(false);
-          loadUser(); // Refresh to update status
+          loadUser(); 
       } catch (e) {
           Alert.alert("Error", "Coach not found or invalid code.");
       } finally {
           setLinking(false);
+      }
+  };
+
+  // --- ⚠️ UPDATED DISCONNECT LOGIC FOR WEB & MOBILE ---
+  
+  // 1. The actual action
+  const executeDisconnect = async () => {
+      setLoading(true);
+      try {
+          await disconnectCoach();
+          if (Platform.OS === 'web') {
+              window.alert("Disconnected: You have left the team.");
+          } else {
+              Alert.alert("Disconnected", "You have left the team.");
+          }
+          loadUser(); // Refresh UI
+      } catch (e) {
+          console.error(e);
+          const msg = "Failed to disconnect.";
+          Platform.OS === 'web' ? window.alert(msg) : Alert.alert("Error", msg);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  // 2. The Trigger (Handles Platform Differences)
+  const handleDisconnect = () => {
+      const title = "Disconnect Coach?";
+      const msg = "You will be removed from the team roster. Your coach will be notified.";
+
+      if (Platform.OS === 'web') {
+          // ✅ Web Support
+          if (window.confirm(`${title}\n\n${msg}`)) {
+              executeDisconnect();
+          }
+      } else {
+          // ✅ Mobile Support
+          Alert.alert(title, msg, [
+              { text: "Cancel", style: "cancel" },
+              { text: "Disconnect", style: "destructive", onPress: executeDisconnect }
+          ]);
       }
   };
 
@@ -214,13 +250,23 @@ export default function ProfileScreen({ navigation }) {
         
         {user.coach_link_status === 'ACTIVE' ? (
             <View style={styles.connectedRow}>
-                <Check size={20} color="#16A34A" />
-                <Text style={styles.connectedText}>Connected to Coach</Text>
+                <View style={{flexDirection:'row', alignItems:'center', gap: 8}}>
+                    <Check size={20} color="#16A34A" />
+                    <Text style={styles.connectedText}>Connected</Text>
+                </View>
+                <TouchableOpacity onPress={handleDisconnect} style={styles.disconnectBtn}>
+                    <Trash2 size={18} color="#EF4444" />
+                </TouchableOpacity>
             </View>
         ) : user.coach_link_status === 'PENDING' ? (
             <View style={[styles.connectedRow, { backgroundColor: '#FFF7ED' }]}>
-                <Clock size={20} color="#D97706" />
-                <Text style={[styles.connectedText, { color: '#9A3412' }]}>Request Pending...</Text>
+                <View style={{flexDirection:'row', alignItems:'center', gap: 8}}>
+                    <Clock size={20} color="#D97706" />
+                    <Text style={[styles.connectedText, { color: '#9A3412' }]}>Pending...</Text>
+                </View>
+                <TouchableOpacity onPress={handleDisconnect} style={styles.disconnectBtn}>
+                    <X size={18} color="#9A3412" />
+                </TouchableOpacity>
             </View>
         ) : (
             <TouchableOpacity style={styles.connectBtn} onPress={() => setShowLinkModal(true)}>
@@ -230,7 +276,7 @@ export default function ProfileScreen({ navigation }) {
         )}
       </View>
 
-      {/* Skill Level - ✅ NOW FUNCTIONAL */}
+      {/* Skill Level */}
       <View style={styles.card}>
         <View style={styles.cardTitleRow}>
           <Target size={20} color={COLORS.primary} />
@@ -350,8 +396,9 @@ const styles = StyleSheet.create({
   goalTextActive: { color: '#166534' },
   connectBtn: { padding: 16, borderRadius: 12, borderStyle: 'dashed', borderWidth: 2, borderColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', backgroundColor: '#F0FDF4' },
   connectBtnText: { color: COLORS.primary, fontWeight: '700' },
-  connectedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: '#DCFCE7', borderRadius: 12 },
+  connectedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, backgroundColor: '#DCFCE7', borderRadius: 12 },
   connectedText: { color: '#16A34A', fontWeight: '700' },
+  disconnectBtn: { padding: 8, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 8 },
   infoText: { color: '#64748B', marginBottom: 12 },
   codeBox: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   codeText: { fontSize: 24, fontWeight: '800', color: '#0F172A', letterSpacing: 2 },

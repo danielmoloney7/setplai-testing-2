@@ -421,7 +421,16 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                 setStep(3); 
             }
         }}>
-            {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{squadMode ? 'Save Squad Session' : 'Next: Assign Targets'}</Text>}
+            {loading ? (
+                <ActivityIndicator color="#FFF" /> 
+            ) : (
+                <Text style={styles.primaryBtnText}>
+                    {squadMode 
+                        ? 'Save Squad Session' 
+                        : (userRole === 'PLAYER' ? 'Accept Program': 'Next: Assign Targets')
+                    }
+                </Text>
+            )}
         </TouchableOpacity>
       </View>
     </View>

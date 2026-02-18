@@ -20,6 +20,7 @@ import MatchDiaryScreen from './src/screens/MatchDiaryScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import MatchListScreen from './src/screens/MatchListScreen';
 import DrillDetailScreen from './src/screens/DrillDetailScreen';
+import ProgramCompleteScreen from './src/screens/ProgramCompleteScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -142,6 +143,12 @@ export default function App() {
         <Stack.Screen 
           name="DrillDetail" 
           component={DrillDetailScreen} 
+          options={{ headerShown: false }} 
+        />
+
+        <Stack.Screen 
+          name="ProgramComplete" 
+          component={ProgramCompleteScreen} 
           options={{ headerShown: false }} 
         />
 

@@ -723,3 +723,51 @@ def respond_to_request(
     db.commit()
 
     return {"status": "success", "new_status": player.coach_link_status}
+
+@router.post("/disconnect-coach")
+def disconnect_coach(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 1. Validation
+    if current_user.role == "COACH":
+        raise HTTPException(status_code=400, detail="Coaches cannot disconnect from themselves.")
+
+    if not current_user.coach_id:
+        raise HTTPException(status_code=400, detail="No coach connected.")
+
+    # 2. Capture old coach ID
+    old_coach_id = current_user.coach_id
+    
+    # 3. Reset Direct Player Link
+    current_user.coach_id = None
+    current_user.coach_link_status = "NONE"
+    
+    # ---------------------------------------------------------
+    # ✅ FIX: Also remove player from any Squads owned by this coach
+    # ---------------------------------------------------------
+    coach_squads = db.query(Squad).filter(Squad.coach_id == old_coach_id).all()
+    squad_ids = [s.id for s in coach_squads]
+    
+    if squad_ids:
+        # Delete membership records for these squads
+        db.query(SquadMember).filter(
+            SquadMember.player_id == current_user.id,
+            SquadMember.squad_id.in_(squad_ids)
+        ).delete(synchronize_session=False)
+    # ---------------------------------------------------------
+
+    # 4. Notify the Coach
+    notif = Notification(
+        id=str(uuid.uuid4()),
+        user_id=old_coach_id,
+        title="Player Left Roster",
+        message=f"{current_user.name} has disconnected from your team.",
+        type="PLAYER_LEFT",
+        reference_id=current_user.id,
+        related_user_id=current_user.id
+    )
+    db.add(notif)
+    
+    db.commit()
+    return {"status": "success", "message": "Disconnected from coach and squads."}

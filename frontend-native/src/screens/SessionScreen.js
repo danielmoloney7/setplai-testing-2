@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Animated, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Zap, Lightbulb, Check, Wand2 } from 'lucide-react-native';
+import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import api from '../services/api';
 import { ASSESSMENT_DRILLS } from '../constants/data';
@@ -27,7 +27,6 @@ const getDifficultyColor = (level) => {
 export default function SessionScreen({ route, navigation }) {
   const { session: initialSession, programId } = route.params || {};
   
-  // ✅ FIX 1: State must be inside the component
   const [currentSession, setCurrentSession] = useState(initialSession);
   const [showAdaptModal, setShowAdaptModal] = useState(false);
 
@@ -151,14 +150,11 @@ export default function SessionScreen({ route, navigation }) {
 
       await api.post('/sessions', payload);
       
-      // ✅ AI Feedback Alert
-      let msg = "Session saved!";
-      if (rpe > 8) msg = "Great intensity! Prioritize recovery.";
-      else if (drillLogs.some(l => l.outcome === 'fail')) msg = "Good effort. Review missed drills.";
-      else msg = "Clean sweep! Ready for level up.";
-
-      setTimeout(() => { Alert.alert("Session Complete", msg); }, 500);
-      navigation.navigate('Main', { screen: 'Progress' });
+      // ✅ Correct Navigation: Pass programId to trigger logic in Summary Screen
+      navigation.replace('SessionSummary', { 
+          session: currentSession, 
+          programId: programId 
+      });
 
     } catch (error) {
       console.error("Save Error:", error);
@@ -181,7 +177,6 @@ export default function SessionScreen({ route, navigation }) {
               <Text style={styles.backText}>Overview</Text>
             </TouchableOpacity>
             
-            {/* ✅ FIX 2: Add Adapt Button */}
             <TouchableOpacity onPress={() => setShowAdaptModal(true)} style={styles.iconBtn}>
                <Wand2 size={24} color={COLORS.primary} />
             </TouchableOpacity>
@@ -220,7 +215,6 @@ export default function SessionScreen({ route, navigation }) {
             <TouchableOpacity style={styles.startBtn} onPress={handleBeginSession}><Text style={styles.startBtnText}>Begin Session</Text></TouchableOpacity>
           </View>
 
-          {/* ✅ FIX 3: Render Modal */}
           <EditSessionModal 
             visible={showAdaptModal}
             onClose={() => setShowAdaptModal(false)}
@@ -319,10 +313,10 @@ export default function SessionScreen({ route, navigation }) {
           </View>
 
           <View style={{width: '100%', paddingHorizontal: 24}}>
-             <TouchableOpacity style={styles.finishDrillBtn} onPress={handleFinishDrill}>
+              <TouchableOpacity style={styles.finishDrillBtn} onPress={handleFinishDrill}>
                 <Check color="#FFF" size={24} />
                 <Text style={styles.finishDrillText}>Complete Drill</Text>
-             </TouchableOpacity>
+              </TouchableOpacity>
           </View>
         </SafeAreaView>
       </View>

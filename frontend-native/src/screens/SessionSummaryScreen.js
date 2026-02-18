@@ -1,38 +1,93 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Activity, CheckCircle, XCircle, Trophy, BarChart2, Bug } from 'lucide-react-native';
+import { ChevronLeft, Clock, Activity, CheckCircle, XCircle, Trophy, BarChart2, ArrowRight } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchSessionLogs } from '../services/api';
+import { fetchSessionLogs, fetchPrograms } from '../services/api';
 
 export default function SessionSummaryScreen({ navigation, route }) {
-  const { session, programId } = route.params;
+  // Ensure we have fallbacks if params are missing
+  const { session = {}, programId } = route.params || {};
+  
   const [logs, setLogs] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // State for completion
+  const [programData, setProgramData] = useState(null);
+  const [isProgramComplete, setIsProgramComplete] = useState(false);
 
   useEffect(() => {
-    loadLogs();
+    loadData();
   }, []);
 
-  const loadLogs = async () => {
+  const loadData = async () => {
     try {
-        const allLogs = await fetchSessionLogs();
+        console.log("🔄 Checking Program Completion for ID:", programId);
+
+        const [allLogs, allPrograms] = await Promise.all([
+            fetchSessionLogs(),
+            fetchPrograms()
+        ]);
         
-        // Match Log by Program ID + Session Index
-        const match = allLogs.find(l => 
+        // 1. Find the Log for THIS specific session
+        // We match program_id AND session_id (which usually stores the day_order)
+        const matchLog = allLogs.find(l => 
             l.program_id === programId && 
-            String(l.session_id) === String(session.day_order)
+            Number(l.session_id) === Number(session.day_order)
         );
+        setLogs(matchLog);
+
+        // 2. Determine if the ENTIRE Program is complete
+        const matchProgram = allPrograms.find(p => p.id === programId);
         
-        setLogs(match);
+        if (matchProgram) {
+            setProgramData(matchProgram);
+
+            // A. Get all 'Day Orders' required by the schedule (e.g. [1, 2, 3, 4])
+            const requiredDays = new Set(
+                (matchProgram.schedule || matchProgram.sessions || []).map(s => Number(s.day_order || s.day))
+            );
+
+            // B. Get all 'Session IDs' completed by the user for this program
+            const completedDays = new Set(
+                allLogs
+                .filter(l => l.program_id === programId)
+                .map(l => Number(l.session_id))
+            );
+
+            // C. Add the CURRENT session (in case the API fetch was slightly too fast and missed the newest log)
+            completedDays.add(Number(session.day_order));
+
+            // D. Check if we have done every required day
+            // We verify that every day in 'requiredDays' exists in 'completedDays'
+            const isComplete = Array.from(requiredDays).every(day => completedDays.has(day));
+
+            console.log(`📊 Progress: ${completedDays.size}/${requiredDays.size} Sessions Completed.`);
+            
+            if (isComplete) {
+                console.log("🎉 PROGRAM COMPLETE!");
+                setIsProgramComplete(true);
+            }
+        }
 
     } catch (e) {
-        console.error("Failed to load logs", e);
+        console.error("Failed to load summary data", e);
     } finally {
         setLoading(false);
     }
   };
 
+  const handleContinue = () => {
+      if (isProgramComplete) {
+          // 🎉 Navigate to Celebration Screen (Replace prevents going back)
+          navigation.replace('ProgramComplete', { program: programData });
+      } else {
+          // Normal return to Dashboard
+          navigation.navigate('Main');
+      }
+  };
+
+  // --- Render Helpers ---
   const Header = () => (
     <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -43,16 +98,7 @@ export default function SessionSummaryScreen({ navigation, route }) {
     </View>
   );
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={COLORS.primary} /></View>;
-
-  if (!logs) return (
-      <SafeAreaView style={styles.container}>
-          <Header />
-          <View style={styles.center}>
-              <Text style={styles.emptyText}>No data recorded for this session.</Text>
-          </View>
-      </SafeAreaView>
-  );
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -61,66 +107,45 @@ export default function SessionSummaryScreen({ navigation, route }) {
         
         {/* STATS CARD */}
         <View style={styles.statsCard}>
-            <Text style={styles.sessionTitle}>{session.title}</Text>
-            <Text style={styles.date}>{new Date(logs.created_at || Date.now()).toDateString()}</Text>
+            <Text style={styles.sessionTitle}>{session.title || "Training Session"}</Text>
+            <Text style={styles.date}>{logs ? new Date(logs.date_completed || Date.now()).toDateString() : "Just Now"}</Text>
             
             <View style={styles.statRow}>
                 <View style={styles.statItem}>
                     <Clock size={20} color="#64748B" />
-                    <Text style={styles.statValue}>{logs.duration_minutes || 0}m</Text>
+                    <Text style={styles.statValue}>{logs?.duration_minutes || 0}m</Text>
                     <Text style={styles.statLabel}>Duration</Text>
                 </View>
                 <View style={styles.divider} />
                 <View style={styles.statItem}>
-                    <Activity size={20} color={(logs.rpe || 0) > 7 ? '#EF4444' : '#10B981'} />
-                    <Text style={[styles.statValue, { color: (logs.rpe || 0) > 7 ? '#EF4444' : '#10B981' }]}>
-                        {logs.rpe || '-'}/10
+                    <Activity size={20} color={(logs?.rpe || 0) > 7 ? '#EF4444' : '#10B981'} />
+                    <Text style={[styles.statValue, { color: (logs?.rpe || 0) > 7 ? '#EF4444' : '#10B981' }]}>
+                        {logs?.rpe || '-'}/10
                     </Text>
                     <Text style={styles.statLabel}>Intensity</Text>
                 </View>
                 <View style={styles.divider} />
                 <View style={styles.statItem}>
                     <Trophy size={20} color="#F59E0B" />
-                    <Text style={styles.statValue}>{logs.xp_earned || 50}</Text>
-                    <Text style={styles.statLabel}>XP Earned</Text>
+                    <Text style={styles.statValue}>+{logs?.xp_earned || 50}</Text>
+                    <Text style={styles.statLabel}>XP</Text>
                 </View>
             </View>
         </View>
 
         {/* DRILL LIST */}
         <Text style={styles.sectionTitle}>Drill Performance</Text>
-        
-        {session.items.map((item, index) => {
-            // --- ROBUST MATCHING LOGIC ---
-            const targetId = item.drill_id || item.drillId || item.id;
-            const targetName = (item.drill_name || item.name || "").trim().toLowerCase();
-
-            // 1. Try ID Match
-            let perf = logs.drill_performances?.find(p => 
-                p.drill_id === targetId || 
-                p.drill_id === item.drill_id
-            );
-
-            // 2. Try Name Match
-            if (!perf) {
-                perf = logs.drill_performances?.find(p => 
-                    (p.drill_name || "").trim().toLowerCase() === targetName
-                );
-            }
-
-            // 3. Try Index Match (Last Resort)
-            if (!perf && logs.drill_performances && logs.drill_performances[index]) {
-                // Only if IDs look like they might be missing or generated
-                perf = logs.drill_performances[index];
-            }
-
+        {session.items && session.items.map((item, index) => {
+            // Logic to match drill result to drill item
+            const drillId = item.drill_id || item.drillId || item.id;
+            const perf = logs?.drill_performances?.find(p => p.drill_id === drillId) || logs?.drill_performances?.[index];
             const isSuccess = perf?.outcome === 'success';
-            
+
             return (
                 <View key={index} style={styles.drillCard}>
                     <View style={styles.drillHeader}>
                         <View style={{flex: 1}}>
-                            <Text style={styles.drillName}>{item.drill_name || item.name}</Text>
+                            <Text style={styles.drillName}>{item.drill_name || item.name || "Drill"}</Text>
                             <Text style={styles.drillMeta}>{item.duration_minutes || 10} min</Text>
                         </View>
                         {perf ? (
@@ -129,33 +154,20 @@ export default function SessionSummaryScreen({ navigation, route }) {
                             <Text style={styles.skippedText}>Skipped</Text>
                         )}
                     </View>
-
-                    {/* Performance Details */}
-                    {perf ? (
-                        <View style={styles.perfRow}>
-                             <View style={[styles.badge, { backgroundColor: isSuccess ? '#DCFCE7' : '#FEE2E2' }]}>
-                                <Text style={[styles.badgeText, { color: isSuccess ? '#16A34A' : '#DC2626' }]}>
-                                    {isSuccess ? 'COMPLETED' : 'ATTEMPTED'}
-                                </Text>
-                            </View>
-                            {perf.achieved_value > 0 && (
-                                <View style={styles.targetBox}>
-                                    <BarChart2 size={14} color="#64748B" />
-                                    <Text style={styles.targetText}>Score: {perf.achieved_value}</Text>
-                                </View>
-                            )}
-                        </View>
-                    ) : (
-                        // DEBUG VIEW: Only shows if Skipped
-                        <View style={{marginTop: 8, padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8}}>
-                             <Text style={{fontSize: 10, color: '#64748B', fontFamily: 'monospace'}}>
-                                Looking for: {targetId} / "{targetName}"
-                             </Text>
-                        </View>
-                    )}
                 </View>
             );
         })}
+
+        {/* ✅ SMART CONTINUE BUTTON */}
+        <TouchableOpacity 
+            style={[styles.continueBtn, isProgramComplete && styles.completeBtn]} 
+            onPress={handleContinue}
+        >
+            <Text style={styles.continueText}>
+                {isProgramComplete ? "Finish Program" : "Return to Dashboard"}
+            </Text>
+            {isProgramComplete ? <Trophy size={20} color="#FFF" /> : <ArrowRight size={20} color="#FFF" />}
+        </TouchableOpacity>
 
       </ScrollView>
     </SafeAreaView>
@@ -183,16 +195,25 @@ const styles = StyleSheet.create({
     drillName: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
     drillMeta: { fontSize: 12, color: '#64748B' },
     skippedText: { fontSize: 12, fontStyle: 'italic', color: '#94A3B8' },
-    perfRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 12 },
-    badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-    badgeText: { fontSize: 10, fontWeight: '800' },
-    targetBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' },
-    targetText: { fontSize: 12, color: '#475569' },
-    emptyText: { color: '#64748B' },
     
-    // Debug Styles
-    debugSection: { marginTop: 40, padding: 16, backgroundColor: '#E2E8F0', borderRadius: 12 },
-    debugTitle: { fontWeight: '700', color: '#475569' },
-    debugText: { fontSize: 12, color: '#334155', marginBottom: 8, fontWeight: '600' },
-    debugItem: { fontSize: 10, fontFamily: 'monospace', color: '#64748B', marginBottom: 2 }
+    // Button Styles
+    continueBtn: {
+        marginTop: 24,
+        backgroundColor: '#64748B', // Default Gray
+        paddingVertical: 16,
+        borderRadius: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        ...SHADOWS.medium
+    },
+    completeBtn: {
+        backgroundColor: COLORS.primary, // Green/Brand Color for Celebration
+    },
+    continueText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: '700'
+    }
 });
