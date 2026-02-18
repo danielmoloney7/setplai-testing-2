@@ -1,6 +1,7 @@
 from app.core.database import SessionLocal, engine, Base
 from app.models.user import User, Squad, SquadMember
 from app.models.training import Drill, Program, ProgramSession, ProgramAssignment
+from app.models.technique import ProVideo  # <--- NEW IMPORT
 from app.core.security import get_password_hash
 import datetime
 import uuid
@@ -52,7 +53,7 @@ def seed_data():
         role="COACH", 
         name="Coach Williams", 
         xp=5000,
-        coach_code="123456" # <--- NEW FIELD
+        coach_code="123456"
     )
     db.add(coach)
     
@@ -64,7 +65,7 @@ def seed_data():
         role="PLAYER", 
         name="Rafael N.", 
         coach_id=coach_id, 
-        coach_link_status="ACTIVE", # <--- NEW FIELD (Ensures they show as Connected)
+        coach_link_status="ACTIVE",
         xp=1200
     )
     
@@ -75,7 +76,7 @@ def seed_data():
         role="PLAYER", 
         name="Serena W.", 
         coach_id=coach_id, 
-        coach_link_status="ACTIVE", # <--- NEW FIELD
+        coach_link_status="ACTIVE",
         xp=3400
     )
 
@@ -130,7 +131,45 @@ def seed_data():
     db.add_all(assignments)
     db.commit()
     print("   ✅ Program assigned.")
-    
+
+    # --- 5. Technique (Pro Videos) ---
+    # Using public sample MP4s so the video player works immediately, but labeling them as Tennis
+    pro_videos = [
+        ProVideo(
+            id="pv_1",
+            player_name="Roger F.",
+            shot_type="Forehand",
+            handedness="Right",
+            tags="Topspin, Whip, Open Stance",
+            # Standard test MP4
+            video_url="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", 
+            thumbnail_url="https://media.giphy.com/media/3o7TKrEzvJbsQNtF5u/giphy.gif"
+        ),
+        ProVideo(
+            id="pv_2",
+            player_name="Serena W.",
+            shot_type="Serve",
+            handedness="Right",
+            tags="Power, Flat, Ace",
+            # Standard test MP4
+            video_url="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+            thumbnail_url="https://media.giphy.com/media/l0HlJDaeqNXVcWWfq/giphy.gif"
+        ),
+        ProVideo(
+            id="pv_3",
+            player_name="Rafa N.",
+            shot_type="Backhand",
+            handedness="Left",
+            tags="Two-Handed, Defense, Spin",
+            # Standard test MP4
+            video_url="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+            thumbnail_url="https://media.giphy.com/media/xT9IgMw9fupOgFb7yM/giphy.gif"
+        )
+    ]
+    db.add_all(pro_videos)
+    db.commit()
+    print("   ✅ Pro Technique Videos added.")
+
     db.close()
 
 if __name__ == "__main__":

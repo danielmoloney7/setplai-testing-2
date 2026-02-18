@@ -303,3 +303,4 @@ const styles = StyleSheet.create({
   declineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FEE2E2', padding: 10, borderRadius: 8 },
   declineText: { color: '#DC2626', fontWeight: '700', fontSize: 13 }
 });
+

@@ -381,4 +381,14 @@ export const disconnectCoach = async () => {
   }
 };
 
+export const fetchProLibrary = async () => {
+  try {
+    const response = await api.get('/technique/pro-videos');
+    return response.data;
+  } catch (error) {
+    console.error("Fetch Pro Library Error:", error);
+    return []; // Return empty array to prevent .map errors
+  }
+};
+
 export default api;

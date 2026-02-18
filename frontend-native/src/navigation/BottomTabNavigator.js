@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Platform, Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { useFocusEffect } from '@react-navigation/native';
-import { Layout, Plus, Users, Dumbbell, ClipboardList, CalendarDays, TrendingUp, User as UserIcon } from 'lucide-react-native';
+import { Layout, Plus, Users, Dumbbell, ClipboardList, CalendarDays, TrendingUp, User as UserIcon, Video, BookOpen } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import { fetchPrograms } from '../services/api';
@@ -16,8 +17,46 @@ import PlansScreen from '../screens/PlansScreen';
 import CoachActionScreen from '../screens/CoachActionScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import TechniqueScreen from '../screens/TechniqueScreen';
+import VideoCompareScreen from '../screens/VideoCompareScreen';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 const Tab = createBottomTabNavigator();
+const TopTab = createMaterialTopTabNavigator();
+const TechniqueStack = createNativeStackNavigator();
+
+// --- 1. Technique Stack (Analysis) ---
+function TechniqueStackNavigator() {
+  return (
+    <TechniqueStack.Navigator screenOptions={{ headerShown: false }}>
+      <TechniqueStack.Screen name="TechniqueHome" component={TechniqueScreen} />
+      <TechniqueStack.Screen name="VideoCompare" component={VideoCompareScreen} />
+    </TechniqueStack.Navigator>
+  );
+}
+
+// --- 2. Combined Library Navigator (Drills + Technique) ---
+function LibraryNavigator() {
+  return (
+    <View style={{ flex: 1, paddingTop: Platform.OS === 'ios' ? 60 : 40, backgroundColor: '#FFF' }}>
+      <Text style={{ fontSize: 28, fontWeight: '800', color: '#0F172A', paddingHorizontal: 24, marginBottom: 10 }}>
+        Library
+      </Text>
+      <TopTab.Navigator
+        screenOptions={{
+          tabBarLabelStyle: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: '#94A3B8',
+          tabBarIndicatorStyle: { backgroundColor: COLORS.primary, height: 3 },
+          tabBarStyle: { elevation: 0, shadowOpacity: 0, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }
+        }}
+      >
+        <TopTab.Screen name="Drills" component={DrillLibraryScreen} />
+        <TopTab.Screen name="Technique" component={TechniqueStackNavigator} options={{ title: 'Analysis' }} />
+      </TopTab.Navigator>
+    </View>
+  );
+}
 
 export default function BottomTabNavigator({ navigation }) {
   const [role, setRole] = useState(null);
@@ -43,7 +82,6 @@ export default function BottomTabNavigator({ navigation }) {
       const checkPending = async () => {
         try {
           const programs = await fetchPrograms();
-          // Count programs where status is 'PENDING'
           const count = programs.filter(p => p.status === 'PENDING').length;
           setPendingCount(count);
         } catch (e) {
@@ -51,10 +89,7 @@ export default function BottomTabNavigator({ navigation }) {
         }
       };
 
-      // Initial check
       checkPending();
-
-      // Optional: Poll every 10 seconds to keep it fresh
       const interval = setInterval(checkPending, 10000);
       return () => clearInterval(interval);
     }, [role])
@@ -69,7 +104,9 @@ export default function BottomTabNavigator({ navigation }) {
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: styles.tabBar,
-        tabBarItemStyle: { height: 50 }, 
+        tabBarShowLabel: true,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', marginBottom: 5 },
+        tabBarItemStyle: { paddingTop: 5 },
       }}
     >
       <Tab.Screen name="Dashboard" component={DashboardScreen} 
@@ -86,7 +123,8 @@ export default function BottomTabNavigator({ navigation }) {
             name="CoachAction" 
             component={CoachActionScreen} 
             options={{ 
-              tabBarLabel: '',
+              tabBarLabel: () => null, 
+              tabBarItemStyle: { width: 60 }, 
               tabBarIcon: () => (
                 <View style={styles.floatingButton}>
                   <Plus color="#FFF" size={30} />
@@ -95,30 +133,40 @@ export default function BottomTabNavigator({ navigation }) {
             }} 
           />
           
-          <Tab.Screen name="Drills" component={DrillLibraryScreen} 
-            options={{ tabBarLabel: 'Drills', tabBarIcon: ({ color }) => <Dumbbell color={color} size={24} /> }} 
-          />
-          
           <Tab.Screen name="Programs" component={ProgramsListScreen} 
             options={{ tabBarLabel: 'Programs', tabBarIcon: ({ color }) => <ClipboardList color={color} size={24} /> }} 
           />
+
+           {/* ✅ Library (Combines Drills + Technique) */}
+           <Tab.Screen 
+            name="Library" 
+            component={LibraryNavigator} 
+            options={{ 
+              tabBarLabel: 'Library', 
+              tabBarIcon: ({ color }) => <BookOpen color={color} size={24} /> 
+            }} 
+          />
+          
+          {/* Hidden Tabs (Accessible via other means) */}
+          {/* <Tab.Screen name="Drills" component={DrillLibraryScreen} options={{ tabBarButton: () => null }} />
+          <Tab.Screen name="Technique" component={TechniqueStackNavigator} options={{ tabBarButton: () => null }} /> */}
         </>
       ) : (
         <>
           <Tab.Screen name="Plans" component={PlansScreen} 
             options={{ 
               tabBarLabel: 'Plans', 
-              // ✅ SHOW BADGE IF PENDING > 0
               tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
               tabBarBadgeStyle: { backgroundColor: '#EF4444', color: '#FFF', fontSize: 10, fontWeight: 'bold' },
               tabBarIcon: ({ color }) => <CalendarDays color={color} size={24} /> 
             }} 
           />
-          
+
           <Tab.Screen name="CreatePlayer" component={View} 
             listeners={{ tabPress: (e) => { e.preventDefault(); navigation.navigate('ProgramBuilder'); } }}
             options={{ 
-              tabBarLabel: '',
+              tabBarLabel: () => null, 
+              tabBarItemStyle: { width: 60 },
               tabBarIcon: () => (
                 <View style={styles.floatingButton}>
                   <Plus color="#FFF" size={30} />
@@ -126,13 +174,22 @@ export default function BottomTabNavigator({ navigation }) {
               ),
             }} 
           />
-          
+
           <Tab.Screen name="Progress" component={ProgressScreen} 
             options={{ tabBarLabel: 'Progress', tabBarIcon: ({ color }) => <TrendingUp color={color} size={24} /> }} 
           />
           
-          <Tab.Screen name="Profile" component={ProfileScreen} 
+          {/* <Tab.Screen name="Profile" component={ProfileScreen} 
             options={{ tabBarLabel: 'Profile', tabBarIcon: ({ color }) => <UserIcon color={color} size={24} /> }} 
+          /> */}
+          
+          <Tab.Screen 
+            name="Technique" 
+            component={TechniqueStackNavigator} 
+            options={{ 
+              tabBarLabel: 'Lab', 
+              tabBarIcon: ({ color }) => <Video color={color} size={24} /> 
+            }} 
           />
         </>
       )}
@@ -143,12 +200,19 @@ export default function BottomTabNavigator({ navigation }) {
 const styles = StyleSheet.create({
   tabBar: { 
     position: 'absolute', 
+    bottom: 0, // ✅ Fix: Anchors to bottom
+    left: 0,   // ✅ Fix: Anchors to left edge
+    right: 0,  // ✅ Fix: Anchors to right edge (Full Width)
     backgroundColor: '#FFFFFF', 
     borderTopWidth: 1, 
     borderTopColor: '#E2E8F0', 
-    height: 70, 
-    paddingBottom: 12,
-    display: 'flex',
+    height: Platform.OS === 'ios' ? 85 : 65, 
+    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   floatingButton: { 
     width: 56, 

@@ -6,11 +6,20 @@ from fastapi.middleware.cors import CORSMiddleware
 # --- IMPORT MODELS HERE (Crucial for creating tables) ---
 from app.models import user, training as training_models 
 
+from fastapi.staticfiles import StaticFiles
+from app.api.v1 import technique # <--- IMPORT NEW ROUTER
+from app.models import technique as technique_models
+
+import os
+
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+os.makedirs("static", exist_ok=True) # Ensure it exists
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,6 +35,7 @@ app.include_router(training.router, prefix="/api/v1", tags=["training"])
 app.include_router(squads.router, prefix="/api/v1/squads", tags=["squads"])
 app.include_router(matches.router, prefix="/api/v1/matches", tags=["Matches"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(technique.router, prefix="/api/v1/technique", tags=["Technique"])
 
 @app.get("/")
 def read_root():
