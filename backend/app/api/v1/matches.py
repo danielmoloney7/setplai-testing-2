@@ -4,10 +4,10 @@ from typing import List, Optional
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.user import User, Notification, SquadMember, Squad, SquadMember
+from app.models.user import User, Notification, Squad, SquadMember # ✅ Added Squad imports
 from app.models.training import MatchEntry
 import uuid
-from datetime import datetime
+from datetime import datetime # ✅ Added datetime
 
 router = APIRouter()
 
@@ -46,8 +46,8 @@ class MatchResponse(MatchCreate):
     id: str
     user_id: str
     player_name: Optional[str] = None  # ✅ Added for Coach View
-    date: Optional[datetime] = None    # ✅ Added for sorting/display
     coach_feedback: Optional[str] = None
+    date: Optional[datetime] = None # ✅ Added Date
     
     class Config:
         orm_mode = True
@@ -64,7 +64,7 @@ def create_notification(db: Session, user_id: str, title: str, message: str, typ
         message=message,
         type=type, 
         reference_id=ref_id,
-        related_user_id=related_id # ✅ Save Player ID
+        related_user_id=related_id 
     )
     db.add(notif)
     db.commit()
@@ -79,52 +79,46 @@ def get_matches(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    print(f"📡 API HIT: get_matches | User: {current_user.name} | Role: {current_user.role} | TeamView: {all_team}")
+    # ✅ FIX: Auto-enable "All Team" view for Coaches if no specific player is requested
+    # This prevents the "0 matches" issue if the frontend forgets the flag
+    if "COACH" in current_user.role.upper() and not player_id and not all_team:
+        all_team = True
 
-    # 1. Handle "All Team" View for Coaches
+    # 1. Handle "All Team" View
     if all_team and "COACH" in current_user.role.upper():
-        # Get direct players
         direct_players = [p.id for p in db.query(User).filter(User.coach_id == current_user.id).all()]
         
-        # Get squad players
         squad_ids = [s.id for s in db.query(Squad).filter(Squad.coach_id == current_user.id).all()]
         squad_players = [m.player_id for m in db.query(SquadMember).filter(SquadMember.squad_id.in_(squad_ids)).all()]
         
         target_ids = list(set(direct_players + squad_players))
-        
-        print(f"   found {len(target_ids)} players: {target_ids}")
         
         if not target_ids:
             return []
             
         query = db.query(MatchEntry).filter(MatchEntry.user_id.in_(target_ids))
     
-    # 2. Handle Specific Player View
+    # 2. Handle Specific Player or Self View
     else:
-        target_id = player_id if (player_id and "COACH" in current_user.role.upper()) else current_user.id
+        target_id = current_user.id
+        if player_id and "COACH" in current_user.role.upper():
+            target_id = player_id
+        
         query = db.query(MatchEntry).filter(MatchEntry.user_id == target_id)
 
-    # 3. Apply Filters
+    # 3. Apply Filters & Sort
     if opponent:
         query = query.filter(MatchEntry.opponent_name.ilike(f"%{opponent}%"))
     
     matches = query.order_by(MatchEntry.date.desc()).all()
-    print(f"   found {len(matches)} matches in DB.")
 
-    # 4. ✅ FIX: Manually construct response to ensure player_name is included
+    # 4. Attach Player Names for Coach Context
     results = []
     for m in matches:
-        # Fetch player name
-        p_name = "Unknown"
-        if all_team:
-            user_obj = db.query(User).filter(User.id == m.user_id).first()
-            if user_obj: 
-                p_name = user_obj.name
-        
-        # Create a dictionary from the DB object
         match_dict = m.__dict__.copy()
-        match_dict["player_name"] = p_name # Explicitly add the name
-        
+        if all_team:
+            player = db.query(User).filter(User.id == m.user_id).first()
+            match_dict["player_name"] = player.name if player else "Unknown"
         results.append(match_dict)
 
     return results
@@ -162,29 +156,15 @@ def create_match_log(
     if "PLAYER" in current_user.role.upper():
         player = db.query(User).filter(User.id == current_user.id).first()
         coach_id = getattr(player, 'coach_id', None)
-
-        # 🔍 Fallback: If no direct coach, check squads
-        if not coach_id:
-            membership = db.query(SquadMember).filter(SquadMember.player_id == player.id).first()
-            if membership:
-                squad = db.query(Squad).filter(Squad.id == membership.squad_id).first()
-                if squad:
-                    coach_id = squad.coach_id
-
+        
         if coach_id:
             msg = f"{player.name} scheduled a match vs {match.opponent_name}."
             if match.score: msg = f"{player.name} logged a result vs {match.opponent_name}."
             
+            # Using new_match.id as reference_id
             background_tasks.add_task(
-                create_notification, db, coach_id, "Match Update", msg, "MATCH_LOG", new_match.id, player.id
+                create_notification, db, coach_id, "Match Update", msg, "MATCH_LOG", new_match.id, player.id 
             )
-
-    # ✅ ADD THIS BLOCK: Notify Player if Coach creates match
-    if "COACH" in current_user.role.upper() and target_id != current_user.id:
-        background_tasks.add_task(
-            create_notification, db, target_id, "New Match Scheduled", 
-            f"Coach added a match vs {match.opponent_name}", "MATCH_LOG", new_match.id, current_user.id
-        )
 
     return new_match
 
@@ -218,18 +198,10 @@ def update_match_details(
             f"Coach updated tactics for vs {match.opponent_name}", "MATCH_TACTICS", match.id
         )
 
-    # ✅ NOTIFY COACH: If Player finishes a scheduled match (Adds score)
+    # ✅ NOTIFY COACH: If Player finishes a scheduled match
     if "PLAYER" in current_user.role.upper() and was_scheduled and updates.score:
         player = db.query(User).filter(User.id == current_user.id).first()
         coach_id = getattr(player, 'coach_id', None)
-
-        # 🔍 Fallback: Check Squads
-        if not coach_id:
-            membership = db.query(SquadMember).filter(SquadMember.player_id == player.id).first()
-            if membership:
-                squad = db.query(Squad).filter(Squad.id == membership.squad_id).first()
-                if squad:
-                    coach_id = squad.coach_id
         
         if coach_id:
              background_tasks.add_task(
@@ -257,7 +229,7 @@ def update_coach_feedback(
     match.coach_feedback = feedback.feedback
     db.commit()
     
-    # ✅ NOTIFY PLAYER: Coach leaves feedback
+    # ✅ NOTIFY PLAYER
     background_tasks.add_task(
         create_notification, db, match.user_id, "New Feedback", 
         f"Coach left notes on your match vs {match.opponent_name}", "MATCH_FEEDBACK", match.id

@@ -1,189 +1,165 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useCallback } from 'react';
 import { 
-  ChevronLeft, Bell, UserPlus, FileText, CheckCircle, XCircle, 
-  Activity, ClipboardList, Trophy, MessageSquare, Users 
-} from 'lucide-react-native'; 
+  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, Alert 
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { 
+  ChevronLeft, Bell, Calendar, Users, Info, Check, 
+  Trophy, MessageSquare, ClipboardList, Activity 
+} from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchNotifications, markNotificationRead, fetchMatches } from '../services/api';
+import { fetchNotifications, markNotificationRead, fetchMatches } from '../services/api'; 
 
-export default function NotificationScreen({ navigation }) {
+export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [navigating, setNavigating] = useState(false); 
 
   const loadData = async () => {
+    setLoading(true);
     try {
-      const data = await fetchNotifications();
-      setNotifications(data || []);
+        const data = await fetchNotifications();
+        setNotifications(data);
     } catch (e) {
-      console.log("Error loading notifications:", e);
+        console.error("Notif Error", e);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+        setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadData();
-  };
-
-  // ✅ HELPER: Handles all Match-related navigation by fetching the specific match object
-  const handleMatchNavigation = async (matchId) => {
-    if (!matchId) return;
-    try {
-      setLoading(true);
-      
-      // 1. Force the team view so Coach sees Player matches
-      const matches = await fetchMatches({ all_team: true }); 
-      
-      // 2. Debug log: see exactly what the API returned
-      console.log(`📡 API returned ${matches.length} total matches for this coach.`);
-      
-      // 3. Find the match
-      const matchData = matches.find(m => m.id === matchId);
-      
-      if (matchData) {
-        navigation.navigate('MatchDiary', { match: matchData });
-      } else {
-        // If length > 0 but ID not found, the ID in the notification 
-        // might not match the ID in the MatchEntry table
-        console.log("❌ Match ID mismatch. Available IDs:", matches.map(m => m.id));
-        Alert.alert("Match Not Found", "The match details are no longer available.");
-      }
-    } catch (e) {
-      console.error("Match Nav Error:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const handlePress = async (item) => {
-    // Mark as read immediately for UX
-    try {
-      markNotificationRead(item.id);
-      setNotifications(prev => prev.map(n => n.id === item.id ? { ...n, is_read: true } : n));
-    } catch (e) {}
+      if (!item.is_read) {
+          try {
+             await markNotificationRead(item.id);
+             setNotifications(prev => prev.map(n => n.id === item.id ? {...n, is_read: true} : n));
+          } catch(e) {}
+      }
 
-    const type = item.type;
-    // Backend uses 'reference_id' for match IDs in notifications
-    const refId = item.reference_id || item.related_id; 
+      const type = item.type || "";
+      const refId = item.reference_id || item.related_id;
 
-    switch (type) {
-        case 'MATCH_LOG':
-        case 'MATCH_TACTICS':
-        case 'MATCH_RESULT':
-        case 'MATCH_FEEDBACK':
-            handleMatchNavigation(refId);
-            break;
+      if (type.includes('MATCH')) {
+          handleMatchNavigation(refId);
+          return;
+      }
 
-        case 'COACH_REQUEST':
-            navigation.navigate('Profile'); 
+      switch (type) {
+        case 'PROGRAM_INVITE':
+            navigation.navigate('Main', { screen: 'Plans' }); 
             break;
 
         case 'SQUAD_INVITE':
-            navigation.navigate('SquadDetail', { 
-              squad: { id: refId, name: 'Squad Invite' } 
-            });
-            break;
-
-        case 'PROGRAM_INVITE':
-        case 'PROGRAM_ASSIGNED':
-            navigation.navigate('Main', { screen: 'Plans' });
+            if (refId) {
+                navigation.navigate('SquadDetail', { squad: { id: refId, name: 'Squad Invite' } });
+            }
             break;
 
         default:
-            if (type && type.includes('MATCH')) {
-                handleMatchNavigation(refId);
-            }
+            console.log("Unknown notification type:", type);
             break;
-    }
+      }
+  };
+
+  const handleMatchNavigation = async (matchId) => {
+      if (!matchId || navigating) return;
+      
+      setNavigating(true);
+      try {
+          // ✅ FIX: Force 'allTeam: true' (2nd arg) so coach sees ALL matches
+          const allMatches = await fetchMatches(null, true); 
+          const targetMatch = allMatches.find(m => m.id === matchId);
+
+          if (targetMatch) {
+              // ✅ FIX: Navigate to 'MatchDiary' (The Detail View)
+              navigation.navigate('MatchDiary', { matchData: targetMatch });
+          } else {
+              Alert.alert("Notice", "Match details could not be found.");
+          }
+      } catch (e) {
+          console.error("Nav Error", e);
+          Alert.alert("Error", "Could not load match details.");
+      } finally {
+          setNavigating(false);
+      }
   };
 
   const getIcon = (type) => {
-    switch (type) {
-        case 'COACH_REQUEST': return <UserPlus size={24} color={COLORS.primary} />;
-        case 'SQUAD_INVITE': return <Users size={20} color="#E11D48" />;
-        case 'PROGRAM_INVITE': return <FileText size={24} color="#0284C7" />;
-        case 'PROGRAM_LEFT': return <XCircle size={24} color="#EF4444" />;
-        case 'COACH_RESPONSE': return <CheckCircle size={24} color="#16A34A" />;
-        case 'MATCH_LOG': return <Activity size={24} color="#F59E0B" />; 
-        case 'MATCH_TACTICS': return <ClipboardList size={20} color="#0F172A" />;
-        case 'MATCH_RESULT': return <Trophy size={20} color="#D97706" />;
-        case 'MATCH_FEEDBACK': return <MessageSquare size={20} color={COLORS.primary} />;
-        default: return <Bell size={24} color="#64748B" />;
-    }
+      switch(type) {
+          case 'PROGRAM_INVITE': return <Calendar size={20} color={COLORS.primary} />;
+          case 'SQUAD_INVITE': return <Users size={20} color="#E11D48" />;
+          case 'MATCH_RESULT': return <Trophy size={20} color="#D97706" />;
+          case 'MATCH_FEEDBACK': return <MessageSquare size={20} color={COLORS.primary} />;
+          case 'MATCH_TACTICS': return <ClipboardList size={20} color="#0F172A" />;
+          case 'MATCH_LOG': return <Activity size={20} color="#854D0E" />;
+          default: return <Info size={20} color="#64748B" />;
+      }
   };
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity 
+      <TouchableOpacity 
         style={[styles.card, !item.is_read && styles.unreadCard]} 
         onPress={() => handlePress(item)}
-        activeOpacity={0.7}
-    >
-      <View style={styles.iconBox}>
-        {getIcon(item.type)}
-      </View>
-      <View style={styles.content}>
-        <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.message}>{item.message}</Text>
-        <Text style={styles.date}>{new Date(item.created_at).toDateString()}</Text>
-      </View>
-      {!item.is_read && <View style={styles.dot} />}
-    </TouchableOpacity>
+      >
+          <View style={[styles.iconBox, !item.is_read && {backgroundColor: '#FFF'}]}>
+              {getIcon(item.type)}
+          </View>
+          <View style={{flex: 1}}>
+              <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                  <Text style={[styles.title, !item.is_read && styles.unreadText]}>{item.title}</Text>
+                  <Text style={styles.time}>{new Date(item.created_at).toLocaleDateString()}</Text>
+              </View>
+              <Text style={styles.message} numberOfLines={2}>{item.message}</Text>
+          </View>
+          {!item.is_read && <View style={styles.dot} />}
+      </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <ChevronLeft size={24} color="#0F172A" />
+            <ChevronLeft size={24} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{ width: 24 }} />
+        <View style={{width: 24}}>
+            {navigating && <ActivityIndicator size="small" color={COLORS.primary} />}
+        </View>
       </View>
 
-      {loading && !refreshing ? (
-        <View style={styles.center}><ActivityIndicator color={COLORS.primary} size="large" /></View>
-      ) : (
-        <FlatList
-          data={notifications}
-          renderItem={renderItem}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
+      <FlatList
+        data={notifications}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+        ListEmptyComponent={
             <View style={styles.center}>
-                <Bell size={48} color="#E2E8F0" />
-                <Text style={styles.emptyText}>No new notifications.</Text>
+                <Bell size={48} color="#CBD5E1" />
+                <Text style={styles.emptyText}>No new notifications</Text>
             </View>
-          }
-        />
-      )}
+        }
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#E2E8F0' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
   backBtn: { padding: 4 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 100 },
   list: { padding: 16 },
-  card: { flexDirection: 'row', backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, alignItems: 'center', ...SHADOWS.small, borderWidth: 1, borderColor: 'transparent' },
-  unreadCard: { borderColor: COLORS.primary, backgroundColor: '#F0FDF4' },
-  iconBox: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginRight: 16 },
-  content: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0', gap: 12 },
+  unreadCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }, 
+  iconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 14, fontWeight: '600', color: '#334155', marginBottom: 2 },
+  unreadText: { fontWeight: '800', color: '#0F172A' },
   message: { fontSize: 13, color: '#64748B', lineHeight: 18 },
-  date: { fontSize: 11, color: '#94A3B8', marginTop: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary, marginLeft: 8 },
-  emptyText: { color: '#94A3B8', marginTop: 16, fontSize: 16, fontWeight: '600' }
+  time: { fontSize: 10, color: '#94A3B8' },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary },
+  center: { alignItems: 'center', justifyContent: 'center', marginTop: 100 },
+  emptyText: { marginTop: 16, color: '#94A3B8', fontSize: 14 }
 });

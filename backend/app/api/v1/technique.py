@@ -1,110 +1,104 @@
-import os
-import shutil
-import uuid
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
-from datetime import datetime
-
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.technique import ProVideo, UserVideo, Comparison
+from app.models.technique import ProVideo, UserVideo, Analysis
+from pydantic import BaseModel
+import shutil
+import os
+import uuid
 
 router = APIRouter()
 
 # --- SCHEMAS ---
-class ProVideoSchema(BaseModel):
+class VideoResponse(BaseModel):
     id: str
-    player_name: str
-    shot_type: str
-    tags: str
-    video_url: str
+    url: str
+    title: Optional[str] = None
+    thumbnail: Optional[str] = None
+    type: str = "user" # 'pro' or 'user'
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
-class ComparisonCreate(BaseModel):
-    pro_video_id: str
-    user_video_id: str
-    pro_offset_sec: float
-    user_offset_sec: float
+class AnalysisCreate(BaseModel):
+    video_a_url: str
+    video_b_url: str
+    notes: Optional[str] = None
 
 # --- ENDPOINTS ---
 
-@router.post("/pro-videos", response_model=ProVideoSchema)
-def create_pro_video(
-    player_name: str = Form(...),
-    shot_type: str = Form(...),
-    tags: str = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+@router.get("/library", response_model=List[VideoResponse])
+def get_pro_library(db: Session = Depends(get_db)):
+    videos = db.query(ProVideo).all()
+    return [
+        {
+            "id": v.id, "url": v.video_url, "title": f"{v.player_name} - {v.shot_type}", 
+            "thumbnail": v.thumbnail_url, "type": "pro"
+        } 
+        for v in videos
+    ]
+
+@router.get("/my-videos", response_model=List[VideoResponse])
+def get_user_videos(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    videos = db.query(UserVideo).filter(UserVideo.user_id == current_user.id).all()
+    return [
+        {
+            "id": v.id, "url": v.video_url, "title": v.title or "Untitled Video", 
+            "thumbnail": v.thumbnail_url, "type": "user"
+        } 
+        for v in videos
+    ]
+
+@router.post("/upload")
+async def upload_video(
+    file: UploadFile = File(...), 
+    title: str = Form(...),
+    db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "COACH":
-         raise HTTPException(403, "Only coaches can upload pro videos")
-
-    # Ensure directory exists
-    os.makedirs("static/pro", exist_ok=True)
+    # Ensure upload directory exists
+    UPLOAD_DIR = "uploads/videos"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     
-    # Save file
-    filename = f"{uuid.uuid4()}_{file.filename}"
-    file_path = f"static/pro/{filename}"
+    # Generate filename
+    file_ext = file.filename.split(".")[-1]
+    filename = f"{uuid.uuid4()}.{file_ext}"
+    file_path = f"{UPLOAD_DIR}/{filename}"
     
-    with open(file_path, "wb+") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Save to DB
-    db_video = ProVideo(
-        player_name=player_name,
-        shot_type=shot_type,
-        tags=tags,
-        video_url=f"/static/pro/{filename}"
-    )
-    db.add(db_video)
-    db.commit()
-    db.refresh(db_video)
-    return db_video
-
-@router.get("/pro-videos", response_model=List[ProVideoSchema])
-def get_pro_videos(db: Session = Depends(get_db)):
-    return db.query(ProVideo).all()
-
-@router.post("/upload-user-video")
-def upload_user_video(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    os.makedirs("static/user", exist_ok=True)
-    
-    filename = f"{current_user.id}_{uuid.uuid4()}_{file.filename}"
-    file_path = f"static/user/{filename}"
-    
-    with open(file_path, "wb+") as buffer:
+    # Save file locally (In production, upload to S3 here)
+    with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    db_video = UserVideo(
-        user_id=current_user.id,
-        video_url=f"/static/user/{filename}"
-    )
-    db.add(db_video)
-    db.commit()
-    db.refresh(db_video)
+    # Create DB Entry
+    # Note: URL is relative path, frontend must prepend BaseURL
+    video_url = f"/static/videos/{filename}" 
     
-    return {"id": db_video.id, "url": db_video.video_url}
+    new_video = UserVideo(
+        user_id=current_user.id,
+        title=title,
+        video_url=video_url
+    )
+    db.add(new_video)
+    db.commit()
+    db.refresh(new_video)
+    
+    return {"id": new_video.id, "url": video_url, "title": title, "type": "user"}
 
-@router.post("/comparisons")
-def save_comparison(
-    comp: ComparisonCreate, 
+@router.post("/analysis")
+def save_analysis(
+    analysis: AnalysisCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    db_comp = Comparison(
+    new_analysis = Analysis(
         user_id=current_user.id,
-        **comp.dict()
+        video_a_url=analysis.video_a_url,
+        video_b_url=analysis.video_b_url,
+        notes=analysis.notes
     )
-    db.add(db_comp)
+    db.add(new_analysis)
     db.commit()
-    return {"status": "success", "id": db_comp.id}
+    return {"message": "Analysis saved"}

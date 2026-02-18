@@ -383,12 +383,44 @@ export const disconnectCoach = async () => {
 
 export const fetchProLibrary = async () => {
   try {
-    const response = await api.get('/technique/pro-videos');
+    const response = await api.get('/technique/library');
     return response.data;
   } catch (error) {
-    console.error("Fetch Pro Library Error:", error);
-    return []; // Return empty array to prevent .map errors
+    return [];
   }
+};
+
+export const fetchUserVideos = async () => {
+  try {
+    const response = await api.get('/technique/my-videos');
+    return response.data;
+  } catch (error) {
+    return [];
+  }
+};
+
+export const uploadUserVideo = async (uri, title) => {
+  const formData = new FormData();
+  formData.append('title', title);
+  formData.append('file', {
+    uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
+    type: 'video/mp4', // Adjust based on actual file type if needed
+    name: 'upload.mp4',
+  });
+
+  const response = await api.post('/technique/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
+export const saveAnalysis = async (videoA, videoB, notes) => {
+  const response = await api.post('/technique/analysis', {
+    video_a_url: videoA,
+    video_b_url: videoB,
+    notes
+  });
+  return response.data;
 };
 
 export default api;

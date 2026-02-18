@@ -1,169 +1,128 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av'; // Using Expo AV for compatibility
-import * as ImagePicker from 'expo-image-picker';
-import { Play, Pause, Lock, Unlock, Upload, ChevronLeft, Save } from 'lucide-react-native';
+import { Play, Pause, FastForward, Save, X, RotateCcw } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
-import { uploadUserVideo, saveComparison } from '../services/api';
-import api from '../services/api';
+import { saveAnalysis } from '../services/api';
 
-export default function VideoCompareScreen({ navigation, route }) {
-  const { proVideo } = route.params;
-  const [userVideoUri, setUserVideoUri] = useState(null);
-  const [userVideoId, setUserVideoId] = useState(null);
-  const [uploading, setUploading] = useState(false);
+const { width } = Dimensions.get('window');
+
+export default function VideoCompareScreen({ route, navigation }) {
+  const { videos } = route.params; // Array of 1 or 2 videos
+  
+  const videoRef1 = useRef(null);
+  const videoRef2 = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLinked, setIsLinked] = useState(true);
+  const [speed, setSpeed] = useState(1.0);
+  const [syncMode, setSyncMode] = useState(true);
 
-  const proPlayer = useRef(null);
-  const userPlayer = useRef(null);
-
-  const handleUpload = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setUserVideoUri(uri);
-      
-      // Upload to backend
-      setUploading(true);
-      try {
-          const res = await uploadUserVideo(uri);
-          setUserVideoId(res.id); // Save ID for comparison
-          Alert.alert("Success", "Video uploaded to cloud.");
-      } catch (e) {
-          Alert.alert("Error", "Failed to upload video.");
-      } finally {
-          setUploading(false);
-      }
-    }
-  };
-
+  // Helper to toggle play/pause for both
   const togglePlay = async () => {
-    const nextState = !isPlaying;
-    setIsPlaying(nextState);
-    
-    if (nextState) {
-        proPlayer.current?.playAsync();
-        if (isLinked) userPlayer.current?.playAsync();
+    if (isPlaying) {
+      await videoRef1.current?.pauseAsync();
+      if (videos[1]) await videoRef2.current?.pauseAsync();
     } else {
-        proPlayer.current?.pauseAsync();
-        if (isLinked) userPlayer.current?.pauseAsync();
+      await videoRef1.current?.playAsync();
+      if (videos[1]) await videoRef2.current?.playAsync();
     }
+    setIsPlaying(!isPlaying);
   };
 
-  const handleSave = async () => {
-      if (!userVideoId) return Alert.alert("Error", "Upload a video first.");
-      try {
-          await saveComparison({
-              pro_video_id: proVideo.id,
-              user_video_id: userVideoId,
-              pro_offset_sec: 0, // Placeholder: Hook up to slider values in Phase 2
-              user_offset_sec: 0
-          });
-          Alert.alert("Saved", "Comparison saved to your history.");
-          navigation.goBack();
-      } catch (e) {
-          Alert.alert("Error", "Could not save.");
-      }
+  // Helper to change speed
+  const changeSpeed = async () => {
+    const newSpeed = speed === 1.0 ? 0.5 : (speed === 0.5 ? 0.25 : 1.0);
+    setSpeed(newSpeed);
+    await videoRef1.current?.setRateAsync(newSpeed, true);
+    if (videos[1]) await videoRef2.current?.setRateAsync(newSpeed, true);
   };
+
+  // Save Analysis
+  const handleSave = async () => {
+      Alert.prompt("Save Analysis", "Add notes to this comparison:", async (notes) => {
+          if (notes) {
+              try {
+                  await saveAnalysis(videos[0].url, videos[1]?.url || "", notes);
+                  Alert.alert("Saved", "Analysis saved to your library.");
+              } catch(e) {
+                  Alert.alert("Error", "Could not save.");
+              }
+          }
+      });
+  };
+
+  const renderSinglePlayer = (video, ref, index) => (
+      <View style={[styles.playerContainer, videos.length === 2 && styles.halfHeight]}>
+          <Video
+            ref={ref}
+            style={styles.video}
+            source={{ uri: video.url }}
+            resizeMode={ResizeMode.CONTAIN}
+            isLooping
+            shouldPlay={false}
+          />
+          <View style={styles.labelBadge}>
+              <Text style={styles.labelText}>{index === 0 ? "Video A" : "Video B"}</Text>
+          </View>
+      </View>
+  );
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.headerOverlay}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
-            <ChevronLeft color="#FFF" size={24} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{proVideo.player_name} vs You</Text>
-        <TouchableOpacity onPress={handleSave} style={[styles.iconBtn, {backgroundColor: COLORS.primary}]}>
-            <Save color="#FFF" size={20} />
-        </TouchableOpacity>
-      </SafeAreaView>
-
-      <View style={styles.videoContainer}>
-        {/* Pro Video */}
-        <View style={styles.videoFrame}>
-            <Video
-                ref={proPlayer}
-                source={{ uri: proVideo.video_url }}
-                style={styles.video}
-                resizeMode={ResizeMode.CONTAIN}
-                isLooping
-                shouldPlay={isPlaying}
-            />
-            <View style={styles.labelBadge}><Text style={styles.labelText}>PRO</Text></View>
-        </View>
-
-        {/* Controls Bar */}
-        <View style={styles.dividerBar}>
-            <TouchableOpacity onPress={() => setIsLinked(!isLinked)} style={styles.syncBtn}>
-                {isLinked ? <Lock size={16} color="#0F172A" /> : <Unlock size={16} color="#64748B" />}
-                <Text style={styles.syncText}>{isLinked ? 'SYNC LOCKED' : 'UNLINKED'}</Text>
-            </TouchableOpacity>
-        </View>
-
-        {/* User Video */}
-        <View style={styles.videoFrame}>
-            {userVideoUri ? (
-                <Video
-                    ref={userPlayer}
-                    source={{ uri: userVideoUri }}
-                    style={styles.video}
-                    resizeMode={ResizeMode.CONTAIN}
-                    isLooping
-                    shouldPlay={isLinked && isPlaying}
-                />
-            ) : (
-                <View style={styles.uploadPlaceholder}>
-                    {uploading ? <ActivityIndicator color="#FFF" /> : (
-                        <TouchableOpacity style={styles.uploadBtn} onPress={handleUpload}>
-                            <Upload size={32} color="#FFF" />
-                            <Text style={styles.uploadText}>Upload Video</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            )}
-            <View style={[styles.labelBadge, {bottom: 10, top: undefined}]}><Text style={styles.labelText}>YOU</Text></View>
-        </View>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/* Header */}
+      <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}><X size={24} color="#FFF" /></TouchableOpacity>
+          <Text style={styles.headerTitle}>Comparison Mode</Text>
+          <TouchableOpacity onPress={handleSave}><Save size={24} color={COLORS.primary} /></TouchableOpacity>
       </View>
 
-      {/* Play Controls */}
+      {/* Video Area */}
+      <View style={styles.content}>
+          {renderSinglePlayer(videos[0], videoRef1, 0)}
+          {videos[1] && renderSinglePlayer(videos[1], videoRef2, 1)}
+      </View>
+
+      {/* Controls */}
       <View style={styles.controls}>
+          <TouchableOpacity onPress={changeSpeed} style={styles.ctrlBtn}>
+              <Text style={styles.speedText}>{speed}x</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity onPress={togglePlay} style={styles.playBtn}>
-              {isPlaying ? <Pause size={32} color="#FFF" fill="#FFF"/> : <Play size={32} color="#FFF" fill="#FFF"/>}
+              {isPlaying ? <Pause size={32} color="#000" fill="#000" /> : <Play size={32} color="#000" fill="#000" />}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+             onPress={async () => {
+                 await videoRef1.current?.replayAsync();
+                 if (videos[1]) await videoRef2.current?.replayAsync();
+                 setIsPlaying(true);
+             }} 
+             style={styles.ctrlBtn}
+          >
+              <RotateCcw size={24} color="#FFF" />
           </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, flexDirection: 'row', justifyContent: 'space-between', padding: 16 },
-  headerTitle: { color: '#FFF', fontWeight: '700', fontSize: 16 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, zIndex: 10 },
+  headerTitle: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   
-  videoContainer: { flex: 1, paddingTop: 80, paddingBottom: 100 },
-  videoFrame: { flex: 1, backgroundColor: '#1E293B', justifyContent: 'center' },
+  content: { flex: 1, justifyContent: 'center' },
+  playerContainer: { flex: 1, justifyContent: 'center', backgroundColor: '#111', borderWidth: 1, borderColor: '#333' },
+  halfHeight: { flex: 0.5 }, // Split screen logic
   video: { width: '100%', height: '100%' },
   
-  dividerBar: { height: 40, backgroundColor: '#0F172A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  syncBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  syncText: { fontSize: 10, fontWeight: '700' },
+  labelBadge: { position: 'absolute', top: 10, left: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 6, borderRadius: 4 },
+  labelText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
 
-  labelBadge: { position: 'absolute', top: 10, left: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 4, borderRadius: 4 },
-  labelText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
-
-  uploadPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  uploadBtn: { alignItems: 'center', gap: 12, backgroundColor: 'rgba(255,255,255,0.1)', padding: 24, borderRadius: 16 },
-  uploadText: { color: '#FFF', fontWeight: '600' },
-
-  controls: { position: 'absolute', bottom: 30, width: '100%', alignItems: 'center' },
-  playBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' }
+  controls: { flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'center', paddingVertical: 20, backgroundColor: '#000' },
+  playBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+  ctrlBtn: { width: 50, height: 50, alignItems: 'center', justifyContent: 'center' },
+  speedText: { color: '#FFF', fontWeight: '800', fontSize: 16 }
 });
