@@ -2,13 +2,18 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, 
   TextInput, ActivityIndicator, RefreshControl, Modal, Alert, ScrollView,
-  KeyboardAvoidingView, Platform, Keyboard 
+  KeyboardAvoidingView, Platform, Keyboard, Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native'; 
-import { Search, Plus, Dumbbell, ChevronRight, Users, Trophy } from 'lucide-react-native';
+import { Search, Plus, Dumbbell, ChevronRight, Users, Trophy, PenTool } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { fetchDrills, createDrill } from '../services/api';
+import api from '../services/api';
+
+// ✅ NEW IMPORTS FOR TACTICS BOARD
+import TacticsBoard from '../components/TacticsBoard';
+import { uploadImage } from '../services/api';
 
 const CATEGORIES = ['All', 'Warmup', 'Serve', 'Forehand', 'Backhand', 'Volley', 'Footwork', 'Strategy', 'Fitness'];
 const DIFFICULTIES = ['Beginner', 'Intermediate', 'Advanced'];
@@ -34,7 +39,11 @@ export default function DrillLibraryScreen({ navigation, route }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   
-  // ✅ Refs
+  // ✅ TACTICS BOARD STATE
+  const [showBoard, setShowBoard] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Refs
   const scrollRef = useRef(null);
   const inputCoords = useRef({});
 
@@ -46,7 +55,8 @@ export default function DrillLibraryScreen({ navigation, route }) {
     default_duration_min: '10',
     target_value: '',
     target_prompt: '',
-    drill_mode: 'Cooperative' 
+    drill_mode: 'Cooperative',
+    media_url: null // ✅ ADDED FIELD
   });
 
   const loadDrills = async () => {
@@ -77,14 +87,32 @@ export default function DrillLibraryScreen({ navigation, route }) {
     }, [route.params?.openModal])
   );
 
-  // ✅ UPDATED: Scroll Handler (Instant & Precise)
   const scrollToInput = (fieldKey) => {
       const y = inputCoords.current[fieldKey];
       if (y !== undefined && scrollRef.current) {
-          // No timeout needed for instant feel. 
-          // We scroll to 'y' which puts the Label at the very top.
           scrollRef.current.scrollTo({ y: y, animated: true }); 
       }
+  };
+
+  // ✅ NEW: Handle Image Upload from Tactics Board
+  const handleSaveDiagram = async (uri) => {
+      setShowBoard(false);
+      setIsUploading(true);
+      try {
+          const serverUrl = await uploadImage(uri);
+          setNewDrill(prev => ({ ...prev, media_url: serverUrl }));
+      } catch (e) {
+          Alert.alert("Upload Failed", "Could not save diagram to the server.");
+      } finally {
+          setIsUploading(false);
+      }
+  };
+
+  const getFullImageUrl = (path) => {
+      if (!path) return null;
+      if (path.startsWith('http')) return path;
+      const baseUrl = api.defaults.baseURL.replace('/api/v1', '');
+      return `${baseUrl}${path}`;
   };
 
   const handleSaveDrill = async () => {
@@ -104,7 +132,7 @@ export default function DrillLibraryScreen({ navigation, route }) {
         setModalVisible(false);
         setNewDrill({ 
             name: '', category: 'Footwork', difficulty: 'Intermediate', 
-            description: '', default_duration_min: '10', target_value: '', target_prompt: '', drill_mode: 'Cooperative' 
+            description: '', default_duration_min: '10', target_value: '', target_prompt: '', drill_mode: 'Cooperative', media_url: null
         });
         loadDrills(); 
         Alert.alert("Success", "Drill saved successfully!");
@@ -172,6 +200,8 @@ export default function DrillLibraryScreen({ navigation, route }) {
             {item.target_value && (
                 <Text style={styles.targetText}>{item.target_value} {item.target_prompt || 'Reps'}</Text>
             )}
+            {/* ✅ Show icon if a diagram exists */}
+            {item.media_url && <PenTool size={16} color="#64748B" style={{marginLeft: 'auto'}}/>}
           </View>
         </TouchableOpacity>
       );
@@ -239,8 +269,7 @@ export default function DrillLibraryScreen({ navigation, route }) {
           <ScrollView 
             ref={scrollRef}
             showsVerticalScrollIndicator={false} 
-            // ✅ FIX 1: Huge padding ensures bottom elements can scroll to top
-            contentContainerStyle={{paddingBottom: 400}} 
+            contentContainerStyle={{paddingBottom: 100}} 
             keyboardShouldPersistTaps="handled"
           >
             
@@ -363,6 +392,34 @@ export default function DrillLibraryScreen({ navigation, route }) {
                 />
             </View>
 
+            {/* ✅ ADDED: TACTICS DIAGRAM SECTION */}
+            <View onLayout={(e) => inputCoords.current['tactics'] = e.nativeEvent.layout.y}>
+                <Text style={styles.label}>Tactics Diagram (Optional)</Text>
+                <TouchableOpacity 
+                    style={styles.drawBtn} 
+                    onPress={() => setShowBoard(true)}
+                >
+                    <PenTool size={20} color="#2563EB" />
+                    <Text style={styles.drawBtnText}>
+                        {newDrill.media_url ? "Edit Tactics Diagram" : "Draw Tactics Diagram"}
+                    </Text>
+                    {isUploading && <ActivityIndicator size="small" color="#2563EB" style={{marginLeft: 'auto'}}/>}
+                </TouchableOpacity>
+
+                {newDrill.media_url && !isUploading && (
+                    <View style={styles.previewContainer}>
+                        <Image 
+                            source={{ uri: getFullImageUrl(newDrill.media_url) }} 
+                            style={styles.previewImage} 
+                            resizeMode="contain" 
+                        />
+                        <TouchableOpacity style={styles.removeImageBtn} onPress={() => setNewDrill({...newDrill, media_url: null})}>
+                            <Text style={styles.removeImageText}>Remove</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </View>
+
           </ScrollView>
 
           <View style={styles.modalActions}>
@@ -375,6 +432,11 @@ export default function DrillLibraryScreen({ navigation, route }) {
           </View>
         </View>
       </KeyboardAvoidingView>
+    </Modal>
+
+    {/* ✅ FULL SCREEN DRAWING BOARD MODAL */}
+    <Modal visible={showBoard} animationType="slide">
+        <TacticsBoard onSave={handleSaveDiagram} onClose={() => setShowBoard(false)} />
     </Modal>
 
     </SafeAreaView>
@@ -405,14 +467,14 @@ const styles = StyleSheet.create({
   modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
   modeText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
   cardDesc: { fontSize: 13, color: '#475569', lineHeight: 20, marginBottom: 12 },
-  cardFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, gap: 12 },
+  cardFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, gap: 12, alignItems: 'center' },
   durationText: { fontSize: 12, fontWeight: '700', color: COLORS.primary, backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   targetText: { fontSize: 12, fontWeight: '700', color: '#6366F1', backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   emptyState: { alignItems: 'center', marginTop: 60, gap: 12 },
   emptyText: { color: '#94A3B8', fontSize: 16, fontWeight: '600' },
   
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
-  modalContent: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, maxHeight: '90%' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
   modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: '700', color: '#64748B', marginBottom: 8, marginTop: 12 },
   subLabel: { fontSize: 11, color: '#94A3B8', marginTop: 4 },
@@ -426,7 +488,16 @@ const styles = StyleSheet.create({
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#FFF' },
   modeBtnText: { fontWeight: '700', color: '#64748B' },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 24, gap: 12 },
+
+  // Tactics Board Styles
+  drawBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE' },
+  drawBtnText: { color: '#2563EB', fontWeight: '700' },
+  previewContainer: { marginTop: 12, position: 'relative' },
+  previewImage: { width: '100%', height: 180, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' },
+  removeImageBtn: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  removeImageText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16, gap: 12, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E2E8F0' },
   cancelBtn: { padding: 12 },
   cancelText: { fontWeight: '700', color: '#64748B' },
   saveBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },

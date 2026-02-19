@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { useFocusEffect } from '@react-navigation/native';
 import { Layout, Plus, Users, Dumbbell, ClipboardList, CalendarDays, TrendingUp, User as UserIcon, Video, BookOpen } from 'lucide-react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import { fetchPrograms } from '../services/api';
@@ -38,12 +39,15 @@ function TechniqueStackNavigator() {
 // --- 2. Combined Library Navigator (Drills + Technique) ---
 function LibraryNavigator() {
   return (
-    <View style={{ flex: 1, paddingTop: Platform.OS === 'ios' ? 60 : 40, backgroundColor: '#FFF' }}>
-      <Text style={{ fontSize: 28, fontWeight: '800', color: '#0F172A', paddingHorizontal: 24, marginBottom: 10 }}>
-        Library
-      </Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FFF' }} edges={['top']}>
+      <View style={{ paddingHorizontal: 24, paddingVertical: 16 }}>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: '#0F172A' }}>
+          Library
+        </Text>
+      </View>
       <TopTab.Navigator
         screenOptions={{
+          headerShown: false,
           tabBarLabelStyle: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
           tabBarActiveTintColor: COLORS.primary,
           tabBarInactiveTintColor: '#94A3B8',
@@ -54,7 +58,7 @@ function LibraryNavigator() {
         <TopTab.Screen name="Drills" component={DrillLibraryScreen} />
         <TopTab.Screen name="Technique" component={TechniqueStackNavigator} options={{ title: 'Analysis' }} />
       </TopTab.Navigator>
-    </View>
+    </SafeAreaView>
   );
 }
 

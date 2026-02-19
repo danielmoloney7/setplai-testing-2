@@ -170,12 +170,10 @@ export default function SessionScreen({ route, navigation }) {
     }
   };
 
-  // Skip straight to summary to save progress made so far
   const handleEndEarly = () => {
     setIsTimerRunning(false);
     clearInterval(timerRef.current);
     
-    // ✅ NEW: Auto-log remaining drills as "skipped"
     if (currentSession && currentSession.items) {
       const skippedLogs = [];
       for (let i = currentDrillIndex; i < currentSession.items.length; i++) {
@@ -189,9 +187,7 @@ export default function SessionScreen({ route, navigation }) {
       setDrillLogs(prev => [...prev, ...skippedLogs]);
     }
 
-    // ✅ NEW: Auto-append to notes to explicitly state it was cancelled early
     setNotes(prev => (prev ? "[Ended Prematurely]\n" + prev : "[Ended Prematurely]"));
-
     setViewState('SUMMARY');
   };
 
@@ -297,6 +293,18 @@ export default function SessionScreen({ route, navigation }) {
 
   // ==================== 2. PREP VIEW ====================
   if (viewState === 'PREP') {
+    // ✅ Logic to determine what media to show
+    const getFullUrl = (path) => {
+        if (!path) return null;
+        if (path.startsWith('http')) return path;
+        const baseUrl = api.defaults.baseURL.replace('/api/v1', '');
+        return `${baseUrl}${path}`;
+    };
+
+    const mediaUrl = currentItem.media_url || drill?.video_url;
+    const isImage = mediaUrl && (mediaUrl.endsWith('.png') || mediaUrl.endsWith('.jpg') || mediaUrl.includes('/images/'));
+    const finalMediaUrl = getFullUrl(mediaUrl);
+
     return (
       <View style={styles.container}>
         <SafeAreaView style={{flex: 1}}>
@@ -308,11 +316,27 @@ export default function SessionScreen({ route, navigation }) {
                 </View>
             </View>
 
+            {/* ✅ UPDATED MEDIA BLOCK */}
             <View style={styles.mediaPlaceholder}>
-                <View style={{alignItems: 'center'}}>
-                    <Play size={48} color="#FFF" fill="rgba(255,255,255,0.2)" />
-                    <Text style={{color: '#FFF', marginTop: 12, fontWeight: '600', opacity: 0.8}}>Video Preview</Text>
-                </View>
+                {finalMediaUrl ? (
+                    isImage ? (
+                        <Image 
+                           source={{ uri: finalMediaUrl }} 
+                           style={{width: '100%', height: '100%', borderRadius: 16}} 
+                           resizeMode="contain"
+                        />
+                    ) : (
+                        <View style={{alignItems: 'center'}}>
+                            <Play size={48} color="#FFF" fill="rgba(255,255,255,0.2)" />
+                            <Text style={{color: '#FFF', marginTop: 12, fontWeight: '600', opacity: 0.8}}>Video Preview</Text>
+                        </View>
+                    )
+                ) : (
+                    <View style={{alignItems: 'center'}}>
+                        <Dumbbell size={48} color="#FFF" opacity={0.5} />
+                        <Text style={{color: '#FFF', marginTop: 12, fontWeight: '600', opacity: 0.8}}>No Image Provided</Text>
+                    </View>
+                )}
             </View>
 
             <Text style={styles.prepTitle}>{currentItem.drill_name}</Text>
@@ -325,7 +349,7 @@ export default function SessionScreen({ route, navigation }) {
 
             <View style={styles.instructionBlock}>
                 <Text style={styles.instructionLabel}>INSTRUCTIONS</Text>
-                <Text style={styles.instructionText}>{currentItem.description || "Focus on form."}</Text>
+                <Text style={styles.instructionText}>{currentItem.description || drill?.description || "Focus on form."}</Text>
             </View>
 
             {currentItem.notes && (
@@ -508,7 +532,7 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 10, fontWeight: '700' },
 
   // PREP VIEW
-  mediaPlaceholder: { width: '100%', aspectRatio: 16/9, backgroundColor: '#1E293B', borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
+  mediaPlaceholder: { width: '100%', aspectRatio: 16/9, backgroundColor: '#1E293B', borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24, overflow: 'hidden' },
   prepTitle: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginBottom: 12 },
   tagPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   instructionBlock: { backgroundColor: '#94A3B8', padding: 16, borderRadius: 12, marginBottom: 16 },
@@ -563,7 +587,7 @@ const styles = StyleSheet.create({
   // Hold to End Button
   holdBtnContainer: {
     height: 56,
-    backgroundColor: '#FEF2F2', // Light red wrapper
+    backgroundColor: '#FEF2F2',
     borderRadius: 16,
     overflow: 'hidden',
     justifyContent: 'center',
@@ -577,7 +601,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: '#FECACA', // Fill color progress
+    backgroundColor: '#FECACA',
   },
   holdBtnContent: {
     flexDirection: 'row',

@@ -305,7 +305,8 @@ def create_program(
                     duration_minutes=drill.duration,
                     notes=drill.notes or "",
                     target_value=drill.target_value,
-                    target_prompt=drill.target_prompt
+                    target_prompt=drill.target_prompt,
+                    media_url=getattr(drill, 'media_url', None)
                 )
                 db.add(db_session)
 

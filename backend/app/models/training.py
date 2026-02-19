@@ -64,7 +64,8 @@ class ProgramSession(Base):
     target_prompt = Column(String(255), nullable=True)
     
     program = relationship("Program", back_populates="sessions")
-
+    media_url = Column(String, nullable=True)
+    
 class ProgramAssignment(Base):
     __tablename__ = "program_assignments"
 

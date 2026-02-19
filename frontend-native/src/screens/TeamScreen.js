@@ -16,28 +16,51 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
   const [modalVisible, setModalVisible] = useState(false);
   const [newSquadName, setNewSquadName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-        const [teamData, squadData] = await Promise.all([
-            fetchMyTeam(),
-            fetchSquads()
-        ]);
-        setTeam(teamData || []);
-        setSquads(squadData || []);
-    } catch (e) {
-        console.error(e);
-    } finally {
-        setLoading(false);
-    }
-  };
+  const loadData = async (isPullToRefresh = false) => {
+  // Only show the physical pull-to-refresh spinner if the user pulled it
+  if (isPullToRefresh) {
+      setIsRefreshing(true);
+  }
+  
+  try {
+      const [teamData, squadData] = await Promise.all([
+          fetchMyTeam(),
+          fetchSquads()
+      ]);
+      setTeam(teamData || []);
+      setSquads(squadData || []);
+  } catch (e) {
+      console.error(e);
+  } finally {
+      setLoading(false);
+      setIsRefreshing(false); // <-- Turn off the spinner
+  }
+};
+
+//   const loadData = async () => {
+//     setLoading(true);
+//     try {
+//         const [teamData, squadData] = await Promise.all([
+//             fetchMyTeam(),
+//             fetchSquads()
+//         ]);
+//         setTeam(teamData || []);
+//         setSquads(squadData || []);
+//     } catch (e) {
+//         console.error(e);
+//     } finally {
+//         setLoading(false);
+//     }
+//   };
 
   // ✅ AUTO-OPEN MODAL LOGIC
   // This catches the instruction from CoachActionScreen
   useFocusEffect(
     useCallback(() => {
-      loadData(); // Load data on focus
+    
+      loadData(false); // Load data on focus
 
       if (route.params?.openModal) {
         setViewMode('SQUADS'); // Switch to squad view automatically
@@ -105,7 +128,7 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>My Team</Text>
         <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
@@ -127,8 +150,8 @@ export default function TeamScreen({ navigation, route }) { // ✅ Added route d
         keyExtractor={item => item.id}
         renderItem={viewMode === 'ATHLETES' ? renderAthleteItem : renderSquadItem}
         contentContainerStyle={styles.list}
-        refreshing={loading}
-        onRefresh={loadData}
+        refreshing={isRefreshing} 
+        onRefresh={() => loadData(true)}
       />
 
       <Modal visible={modalVisible} transparent animationType="slide">

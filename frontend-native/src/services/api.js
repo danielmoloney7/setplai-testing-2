@@ -424,3 +424,17 @@ export const saveAnalysis = async (videoA, videoB, notes) => {
 };
 
 export default api;
+
+export const uploadImage = async (uri) => {
+  const formData = new FormData();
+  formData.append('file', {
+    uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
+    type: 'image/png',
+    name: 'diagram.png',
+  });
+
+  const response = await api.post('/technique/upload-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data.url;
+};

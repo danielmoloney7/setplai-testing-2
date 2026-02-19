@@ -102,3 +102,22 @@ def save_analysis(
     db.add(new_analysis)
     db.commit()
     return {"message": "Analysis saved"}
+
+@router.post("/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    UPLOAD_DIR = "uploads/images"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    file_ext = file.filename.split(".")[-1] if "." in file.filename else "png"
+    filename = f"{uuid.uuid4()}.{file_ext}"
+    file_path = f"{UPLOAD_DIR}/{filename}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    image_url = f"/static/images/{filename}" 
+    return {"url": image_url}
