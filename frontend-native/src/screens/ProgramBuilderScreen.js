@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 
-import { fetchMyTeam, fetchDrills, createProgram, fetchSquads, fetchSessionLogs } from '../services/api'; 
+import { fetchMyTeam, fetchDrills, createProgram, fetchSquads, fetchSessionLogs, fetchUserProfile, fetchPrograms } from '../services/api'; 
 import { generateAIProgram, generateSquadProgram } from '../services/geminiService';
 
 import EditSessionModal from '../components/EditSessionModal';
@@ -26,7 +26,6 @@ const PREMADE_PROGRAMS = [
 ];
 
 export default function ProgramBuilderScreen({ navigation, route }) {
-  // ✅ Capture targetIds if passed from SquadDetail
   const { squadMode, initialPrompt, autoStart, targetIds } = route.params || {};
 
   const [step, setStep] = useState(autoStart ? 1 : 0); 
@@ -46,7 +45,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [numCourts, setNumCourts] = useState('1');
 
   const [draftProgram, setDraftProgram] = useState({ title: '', description: '', sessions: [] });
-  // ✅ Pre-select target if passed
+  const [existingPrograms, setExistingPrograms] = useState([]);
+  
   const [selectedTargets, setSelectedTargets] = useState(targetIds || []);
 
   const [editingSessionIndex, setEditingSessionIndex] = useState(null);
@@ -55,6 +55,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [activeSessionIdx, setActiveSessionIdx] = useState(null);
   const [showDrillConfig, setShowDrillConfig] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [userProfile, setUserProfile] = useState({});
 
   useEffect(() => {
     const init = async () => {
@@ -64,14 +65,18 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         if (id) setUserId(id);
 
         try {
-            const [teamData, drillsData, squadsData] = await Promise.all([
+            const [teamData, drillsData, squadsData, profileData, programsData] = await Promise.all([
                 fetchMyTeam(), 
                 fetchDrills(),
-                fetchSquads()
+                fetchSquads(),
+                fetchUserProfile(),
+                fetchPrograms()
             ]);
             setAthletes(teamData || []);
             setAvailableDrills(drillsData || []);
             setSquads(squadsData || []); 
+            setUserProfile(profileData || {}); 
+            setExistingPrograms(programsData || []); 
         } catch (e) { console.log("Data load error", e); }
     };
     init();
@@ -99,7 +104,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             aiResult = await generateAIProgram(
                 `${prompt} (Duration: ${durationWeeks} weeks)`,
                 allDrills,
-                { id: userId, role: userRole, level: "Intermediate", goals: [] },
+                { id: userId, role: userRole, level: userProfile?.level || "Intermediate", goals: userProfile?.goals || [] },
                 historyLogs,
                 { weeks: parseInt(durationWeeks) || 4 }
             );
@@ -149,9 +154,9 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const handleSelectDrill = (drill) => {
     if (activeSessionIdx === null) return;
     const newItem = {
-        drillId: drill.id,
+        drill_id: drill.id,
         drill_name: drill.name,
-        targetDurationMin: drill.default_duration_min || 10,
+        duration_minutes: drill.default_duration_min || 10,
         notes: '',
         mode: 'Cooperative'
     };
@@ -190,40 +195,78 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     setEditingSessionIndex(null);
   };
 
-  // ✅ CRITICAL: Correctly flag Squad Sessions & Fix Navigation
-  const handleFinalize = async (targets) => {
+  const confirmAndFinalize = async (targets) => {
+    const isSquadSession = squadMode === true;
+    const currentProgramType = isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN';
+
+    // Verify target array is correctly utilized
+    let finalTargets = targets;
+    if (targets.length === 0 && targetIds && targetIds.length > 0) {
+        finalTargets = targetIds;
+    }
+
+    // Identify if any of the targets is a Squad ID
+    const selectedSquadId = finalTargets.find(tId => squads.some(sq => sq.id === tId));
+
+    if (selectedSquadId) {
+        // Look through existing programs for conflicts
+        const squadHasActiveProgram = existingPrograms.some(p => 
+            p.squad_id === selectedSquadId && 
+            p.program_type === currentProgramType && 
+            (p.status === 'ACTIVE' || p.status === 'PENDING')
+        );
+
+        if (squadHasActiveProgram) {
+            const typeName = currentProgramType === "SQUAD_SESSION" ? "Squad Session" : "Player Plan";
+            Alert.alert(
+                `Replace Active ${typeName}?`,
+                `This squad currently has an active ${typeName}. Assigning this new one will automatically complete their current one. Do you want to continue?`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { 
+                        text: "Yes, Replace It", 
+                        style: "destructive", 
+                        onPress: () => handleFinalize(finalTargets, selectedSquadId) 
+                    }
+                ]
+            );
+            return; 
+        }
+    }
+
+    handleFinalize(finalTargets, selectedSquadId);
+  };
+
+  const handleFinalize = async (targets, selectedSquadId = null) => {
     setLoading(true);
     try {
         const isSquadSession = squadMode === true;
-        
-        // Auto-detect Squad ID from targets if not explicit
-        const explicitSquadId = targets.find(tId => squads.some(sq => sq.id === tId));
         
         const payload = {
             title: draftProgram.title,
             description: draftProgram.description || "",
             status: userRole === 'PLAYER' ? 'ACTIVE' : 'PENDING', 
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
-            
-            // ✅ Send Flags to Backend
             program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
-            squad_id: isSquadSession 
-                ? (targets.length > 0 ? targets[0] : null) 
-                : (explicitSquadId || null),
+            
+            // ✅ Cleaned up squad mapping logic
+            squad_id: selectedSquadId || null,
 
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
-                    const realDrill = availableDrills.find(d => d.id === (item.drillId || item.id));
-                    const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Drill");
+                    // Standardize Drill extraction
+                    const safeDrillId = item.drill_id || item.drillId || item.id;
+                    const realDrill = availableDrills.find(d => d.id === safeDrillId);
+                    const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Custom Drill");
 
                     return {
-                        drill_id: item.drillId || item.id, 
+                        drill_id: safeDrillId || `custom_${Date.now()}`, 
                         drill_name: prettyName, 
-                        duration: parseInt(item.duration || item.targetDurationMin || 15),
+                        duration: parseInt(item.duration_minutes || item.duration || item.targetDurationMin || 15, 10),
                         notes: item.notes || "",
-                        target_value: realDrill?.target_value || item.target_value || null,
-                        target_prompt: realDrill?.target_prompt || item.target_prompt || null
+                        target_value: item.target_value || realDrill?.target_value || null,
+                        target_prompt: item.target_prompt || realDrill?.target_prompt || null
                     };
                 })
             }))
@@ -234,11 +277,16 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         await createProgram(payload);
         setLoading(false);
         
-        // ✅ NAVIGATION FIX IS HERE
-        if (isSquadSession) {
-             // REPLACE the current screen (Builder) with SquadDetail.
-             // This removes Builder from the history stack.
-             navigation.replace('SquadDetail', { squad: { id: targets[0] } });
+        if (isSquadSession && selectedSquadId) {
+            navigation.dispatch(
+                CommonActions.reset({
+                    index: 1,
+                    routes: [
+                        { name: 'Main', state: { routes: [{ name: 'Team' }] } }, // The underlying screen
+                        { name: 'SquadDetail', params: { squad: { id: selectedSquadId } } } // The active screen
+                    ],
+                })
+            );
         } else {
             const targetTab = userRole === 'PLAYER' ? 'Plans' : 'Programs';
             navigation.dispatch(
@@ -257,10 +305,16 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   };
 
   const toggleTarget = (id) => {
-    if (selectedTargets.includes(id)) {
-      setSelectedTargets(prev => prev.filter(t => t !== id));
+    if (squadMode) {
+        // ✅ Enforce Single Selection for Squad Mode
+        setSelectedTargets([id]);
     } else {
-      setSelectedTargets(prev => [...prev, id]);
+        // Multi selection for standard mode
+        if (selectedTargets.includes(id)) {
+            setSelectedTargets(prev => prev.filter(t => t !== id));
+        } else {
+            setSelectedTargets(prev => [...prev, id]);
+        }
     }
   };
 
@@ -368,15 +422,19 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                  </View>
                  <View style={styles.drillList}>
                     {s.items?.map((item, dIdx) => {
-                        const drillInfo = availableDrills.find(d => d.id === (item.drillId || item.drill_id));
-                        const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.name || "Drill");
+                        // ✅ Standardized Drill Parsing
+                        const safeDrillId = item.drill_id || item.drillId || item.id;
+                        const drillInfo = availableDrills.find(d => d.id === safeDrillId);
+                        const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.name || "Custom Drill");
+                        const displayDuration = item.duration_minutes || item.duration || item.targetDurationMin || 15;
+
                         return (
                             <View key={dIdx} style={styles.drillRow}>
                                 <View style={{flex: 1}}>
                                     <Text style={styles.drillName}>{displayName}</Text>
                                     <View style={{flexDirection:'row', alignItems:'center', marginTop: 4}}>
                                         <Clock size={12} color="#64748B" />
-                                        <Text style={styles.drillMeta}> {item.duration || item.targetDurationMin}m</Text>
+                                        <Text style={styles.drillMeta}> {displayDuration}m</Text>
                                     </View>
                                 </View>
                                 {userRole !== 'PLAYER' && (
@@ -412,10 +470,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
       <View style={styles.footerBtnContainer}>
         <TouchableOpacity style={styles.primaryBtn} disabled={loading} onPress={() => { 
-            // If Squad Mode, we already have the target ID, skip to save.
-            if (squadMode) {
-                handleFinalize(selectedTargets); 
-            } else if (userRole === 'PLAYER') {
+            // ✅ FORCES Step 3 so Coach explicitly assigns it.
+            if (userRole === 'PLAYER') {
                 handleFinalize(['SELF']);
             } else {
                 setStep(3); 
@@ -425,10 +481,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                 <ActivityIndicator color="#FFF" /> 
             ) : (
                 <Text style={styles.primaryBtnText}>
-                    {squadMode 
-                        ? 'Save Squad Session' 
-                        : (userRole === 'PLAYER' ? 'Accept Program': 'Next: Assign Targets')
-                    }
+                    {userRole === 'PLAYER' ? 'Accept Program': 'Next: Assign Targets'}
                 </Text>
             )}
         </TouchableOpacity>
@@ -454,7 +507,11 @@ export default function ProgramBuilderScreen({ navigation, route }) {
            ))}
        </ScrollView>
        <View style={styles.footerBtnContainer}>
-           <TouchableOpacity style={[styles.primaryBtn, selectedTargets.length === 0 && styles.disabledBtn]} disabled={selectedTargets.length === 0 || loading} onPress={() => handleFinalize(selectedTargets)}>
+           <TouchableOpacity 
+              style={[styles.primaryBtn, selectedTargets.length === 0 && styles.disabledBtn]} 
+              disabled={selectedTargets.length === 0 || loading} 
+              onPress={() => confirmAndFinalize(selectedTargets)} 
+            >
                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Save & Assign</Text>}
            </TouchableOpacity>
        </View>

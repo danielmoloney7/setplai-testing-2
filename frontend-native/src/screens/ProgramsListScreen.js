@@ -10,11 +10,32 @@ import { fetchPrograms, updateProgramStatus } from '../services/api';
 export default function ProgramsListScreen({ navigation }) {
   const [role, setRole] = useState('PLAYER');
   const [programs, setPrograms] = useState([]);
-  const [archivedPrograms, setArchivedPrograms] = useState([]); // ✅ Store archived
-  const [viewMode, setViewMode] = useState('ACTIVE'); // ✅ Toggle State: 'ACTIVE' | 'ARCHIVED'
+  const [archivedPrograms, setArchivedPrograms] = useState([]); 
+  const [viewMode, setViewMode] = useState('ACTIVE'); 
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(useCallback(() => { loadData(); }, []));
+
+  const getDerivedStatus = (item, currentRole) => {
+      let st = (item.status || '').toUpperCase();
+      
+      // If it's explicitly completed or archived, don't override
+      if (st === 'COMPLETED' || st === 'ARCHIVED') return st;
+
+      // For coaches, we derive the status based on player acceptance
+      if (currentRole === 'COACH') {
+          if (item.program_type === 'SQUAD_SESSION') return 'ACTIVE';
+          
+          const assignedList = item.assigned_to || [];
+          const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
+          
+          if (assignedList.length > 0) {
+              if (pendingCount === 0) return 'ACTIVE'; // Everyone accepted
+              if (pendingCount > 0) return 'PENDING'; // Still waiting on someone
+          }
+      }
+      return st;
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -23,33 +44,32 @@ export default function ProgramsListScreen({ navigation }) {
         const currentRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
         setRole(currentRole);
         
-        // 1. Fetch Data
-        // NOTE: Ensure your backend fetchPrograms returns ALL programs (or add a query param if backend filters)
-        // If backend filters out archived, you might need a new endpoint or param like ?include_archived=true
         const dbPrograms = await fetchPrograms(); 
 
-        // 2. Split into Active vs Archived
         const active = [];
         const archived = [];
 
         dbPrograms.forEach(p => {
-            if (p.status === 'ARCHIVED') {
+            const pStatus = (p.status || '').toUpperCase();
+            // Group COMPLETED and ARCHIVED together
+            if (pStatus === 'ARCHIVED' || pStatus === 'COMPLETED') {
                 archived.push(p);
             } else {
                 active.push(p);
             }
         });
 
-        // 3. Sort Active: PENDING first, then by Date
+        // Sort Active: PENDING first, then by Date
         const sortedActive = active.sort((a, b) => {
-            const statusA = (a.status || '').toUpperCase();
-            const statusB = (b.status || '').toUpperCase();
+            const statusA = getDerivedStatus(a, currentRole);
+            const statusB = getDerivedStatus(b, currentRole);
+
             if (statusA === 'PENDING' && statusB !== 'PENDING') return -1;
             if (statusA !== 'PENDING' && statusB === 'PENDING') return 1;
             return new Date(b.created_at || 0) - new Date(a.created_at || 0);
         });
 
-        // 4. Sort Archived: Newest First
+        // Sort Archived: Newest First
         const sortedArchived = archived.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         setPrograms(sortedActive);
@@ -76,7 +96,10 @@ export default function ProgramsListScreen({ navigation }) {
     const assignedList = item.assigned_to || [];
     const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
     const activeCount = assignedList.filter(a => a.status === 'ACTIVE').length;
-    const isArchived = item.status === 'ARCHIVED';
+    
+    // ✅ Use the smart status logic for rendering
+    const displayStatus = getDerivedStatus(item, role);
+    const isArchived = displayStatus === 'ARCHIVED' || displayStatus === 'COMPLETED';
 
     return (
       <TouchableOpacity 
@@ -92,9 +115,12 @@ export default function ProgramsListScreen({ navigation }) {
               
               <Text style={styles.cardSub}>
                   {role === 'COACH' ? (
-                      pendingCount > 0 
-                      ? <Text style={{color: '#EA580C', fontWeight: 'bold'}}>{pendingCount} Pending Invite(s)</Text> 
-                      : `${activeCount} Active Athletes`
+                      item.program_type === 'SQUAD_SESSION' 
+                      ? 'Squad Training' 
+                      : (pendingCount > 0 
+                          ? <Text style={{color: '#EA580C', fontWeight: 'bold'}}>{pendingCount} Pending Invite(s)</Text> 
+                          : `${activeCount} Active Athletes`
+                      )
                   ) : (
                       item.coach_name || 'Coach'
                   )}
@@ -103,22 +129,22 @@ export default function ProgramsListScreen({ navigation }) {
           
           {/* Status Badge */}
           <View style={[styles.badge, 
-              item.status === 'ACTIVE' ? styles.activeBadge : 
-              (item.status === 'PENDING' ? styles.pendingBadge : 
+              displayStatus === 'ACTIVE' ? styles.activeBadge : 
+              (displayStatus === 'PENDING' ? styles.pendingBadge : 
               (isArchived ? styles.archivedBadge : styles.declinedBadge))
           ]}>
               <Text style={[styles.badgeText, 
-                  item.status === 'ACTIVE' ? styles.activeText : 
-                  (item.status === 'PENDING' ? styles.pendingText : 
+                  displayStatus === 'ACTIVE' ? styles.activeText : 
+                  (displayStatus === 'PENDING' ? styles.pendingText : 
                   (isArchived ? styles.archivedText : styles.declinedText))
               ]}>
-                  {item.status}
+                  {displayStatus}
               </Text>
           </View>
         </View>
 
         {/* Action Buttons (Player Only - Pending) */}
-        {role === 'PLAYER' && item.status === 'PENDING' && !isArchived && (
+        {role === 'PLAYER' && displayStatus === 'PENDING' && !isArchived && (
             <View style={styles.actionsRow}>
                 <TouchableOpacity 
                     style={[styles.actionBtn, styles.declineBtn]} 
@@ -151,7 +177,7 @@ export default function ProgramsListScreen({ navigation }) {
         )}
       </View>
 
-      {/* ✅ Toggle Filter */}
+      {/* Filter Tabs */}
       <View style={styles.filterContainer}>
           <TouchableOpacity 
             style={[styles.filterBtn, viewMode === 'ACTIVE' && styles.filterBtnActive]} 
@@ -190,7 +216,6 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 24, backgroundColor: '#FFF' },
   headerTitle: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
   
-  // ✅ Filter Styles
   filterContainer: { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   filterBtn: { marginRight: 24, paddingBottom: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   filterBtnActive: { borderBottomColor: COLORS.primary },
@@ -198,7 +223,7 @@ const styles = StyleSheet.create({
   filterTextActive: { color: COLORS.primary, fontWeight: '700' },
 
   card: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, ...SHADOWS.small },
-  archivedCard: { backgroundColor: '#F1F5F9', opacity: 0.8 }, // Visual cue for archive
+  archivedCard: { backgroundColor: '#F1F5F9', opacity: 0.8 }, 
   
   cardHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   iconContainer: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center' },
@@ -210,7 +235,7 @@ const styles = StyleSheet.create({
   pendingBadge: { backgroundColor: '#FFF7ED' },
   activeBadge: { backgroundColor: '#DCFCE7' },
   declinedBadge: { backgroundColor: '#FEF2F2' },
-  archivedBadge: { backgroundColor: '#E2E8F0' }, // Grey badge for archive
+  archivedBadge: { backgroundColor: '#E2E8F0' }, 
   
   badgeText: { fontSize: 9, fontWeight: '700' },
   pendingText: { color: '#C2410C' },

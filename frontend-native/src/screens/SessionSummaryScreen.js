@@ -30,7 +30,6 @@ export default function SessionSummaryScreen({ navigation, route }) {
         ]);
         
         // 1. Find the Log for THIS specific session
-        // We match program_id AND session_id (which usually stores the day_order)
         const matchLog = allLogs.find(l => 
             l.program_id === programId && 
             Number(l.session_id) === Number(session.day_order)
@@ -59,7 +58,6 @@ export default function SessionSummaryScreen({ navigation, route }) {
             completedDays.add(Number(session.day_order));
 
             // D. Check if we have done every required day
-            // We verify that every day in 'requiredDays' exists in 'completedDays'
             const isComplete = Array.from(requiredDays).every(day => completedDays.has(day));
 
             console.log(`📊 Progress: ${completedDays.size}/${requiredDays.size} Sessions Completed.`);
@@ -139,21 +137,43 @@ export default function SessionSummaryScreen({ navigation, route }) {
             // Logic to match drill result to drill item
             const drillId = item.drill_id || item.drillId || item.id;
             const perf = logs?.drill_performances?.find(p => p.drill_id === drillId) || logs?.drill_performances?.[index];
+            
+            // ✅ IDENTIFY OUTCOMES ROBUSTLY
             const isSuccess = perf?.outcome === 'success';
+            const isSkipped = perf?.outcome === 'skipped' || !perf; // Check explicit skipped flag or missing log
 
             return (
-                <View key={index} style={styles.drillCard}>
+                <View key={index} style={[styles.drillCard, isSkipped && { opacity: 0.6 }]}>
                     <View style={styles.drillHeader}>
                         <View style={{flex: 1}}>
                             <Text style={styles.drillName}>{item.drill_name || item.name || "Drill"}</Text>
                             <Text style={styles.drillMeta}>{item.duration_minutes || 10} min</Text>
                         </View>
-                        {perf ? (
-                            isSuccess ? <CheckCircle color="#16A34A" size={24} /> : <XCircle color="#DC2626" size={24} />
-                        ) : (
+                        {isSkipped ? (
                             <Text style={styles.skippedText}>Skipped</Text>
+                        ) : isSuccess ? (
+                            <CheckCircle color="#16A34A" size={24} />
+                        ) : (
+                            <XCircle color="#DC2626" size={24} />
                         )}
                     </View>
+
+                    {/* ✅ ONLY SHOW PERFORMANCE DETAILS IF ACTUALLY ATTEMPTED */}
+                    {!isSkipped && perf && (
+                        <View style={styles.perfRow}>
+                             <View style={[styles.badge, { backgroundColor: isSuccess ? '#DCFCE7' : '#FEE2E2' }]}>
+                                <Text style={[styles.badgeText, { color: isSuccess ? '#16A34A' : '#DC2626' }]}>
+                                    {isSuccess ? 'COMPLETED' : 'ATTEMPTED'}
+                                </Text>
+                            </View>
+                            {perf.achieved_value > 0 && (
+                                <View style={styles.targetBox}>
+                                    <BarChart2 size={14} color="#64748B" />
+                                    <Text style={styles.targetText}>Score: {perf.achieved_value}</Text>
+                                </View>
+                            )}
+                        </View>
+                    )}
                 </View>
             );
         })}
@@ -190,11 +210,20 @@ const styles = StyleSheet.create({
     statLabel: { fontSize: 12, color: '#64748B', marginTop: 2 },
     divider: { width: 1, height: 40, backgroundColor: '#E2E8F0' },
     sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12 },
+    
+    // Drill Card Styles
     drillCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
     drillHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     drillName: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
     drillMeta: { fontSize: 12, color: '#64748B' },
-    skippedText: { fontSize: 12, fontStyle: 'italic', color: '#94A3B8' },
+    skippedText: { fontSize: 13, fontStyle: 'italic', color: '#94A3B8', fontWeight: '600' },
+    
+    // Performance Row inside Drill Card
+    perfRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 12 },
+    badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+    badgeText: { fontSize: 10, fontWeight: '800' },
+    targetBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' },
+    targetText: { fontSize: 12, color: '#475569', fontWeight: '600' },
     
     // Button Styles
     continueBtn: {

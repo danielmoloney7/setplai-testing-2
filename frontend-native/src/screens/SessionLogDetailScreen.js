@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ChevronLeft, Clock, Activity, Calendar, CheckCircle, XCircle, FileText, User, Heart, MessageSquare, Save, Edit2 } from 'lucide-react-native'; // ✅ Add Edit2
+import { ChevronLeft, Clock, Activity, Calendar, CheckCircle, XCircle, FileText, User, Heart, MessageSquare, Save, Edit2 } from 'lucide-react-native'; 
 import { COLORS, SHADOWS } from '../constants/theme';
 import { submitSessionFeedback } from '../services/api';
 
@@ -15,7 +15,7 @@ export default function SessionLogDetailScreen({ route, navigation }) {
   const [liked, setLiked] = useState(sessionLog.coach_liked || false);
   const [saving, setSaving] = useState(false);
   
-  // ✅ NEW: Control Edit Mode
+  // Control Edit Mode
   // If feedback exists, start closed (false). If empty, start open (true).
   const [isEditing, setIsEditing] = useState(!sessionLog.coach_feedback);
 
@@ -31,7 +31,7 @@ export default function SessionLogDetailScreen({ route, navigation }) {
       try {
           await submitSessionFeedback(sessionLog.id, feedback, liked);
           Alert.alert("Success", "Feedback saved!");
-          setIsEditing(false); // ✅ Close the card (switch to view mode)
+          setIsEditing(false); // Close the card (switch to view mode)
       } catch (e) {
           console.error(e);
           Alert.alert("Error", "Could not save feedback.");
@@ -46,7 +46,6 @@ export default function SessionLogDetailScreen({ route, navigation }) {
       }
   };
 
-  // ... (Keep formatDate and getRpeColor helpers the same) ...
   const formatDate = (dateString) => {
     if (!dateString) return 'Unknown Date';
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -82,7 +81,7 @@ export default function SessionLogDetailScreen({ route, navigation }) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ... (Overview Card remains exactly the same) ... */}
+        {/* Overview Card */}
         <View style={styles.overviewCard}>
           <View style={styles.programBadge}>
              <Text style={styles.programText}>{sessionLog.program?.title || "Training Session"}</Text>
@@ -113,7 +112,7 @@ export default function SessionLogDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* ✅ UPDATED: COACH FEEDBACK SECTION */}
+        {/* COACH FEEDBACK SECTION */}
         <View style={styles.section}>
             <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 12}}>
                 <Text style={styles.sectionTitle}>Coach Feedback</Text>
@@ -137,12 +136,10 @@ export default function SessionLogDetailScreen({ route, navigation }) {
                         onChangeText={setFeedback}
                     />
                     <View style={{flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 12}}>
-                        {/* Cancel Button */}
                         <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsEditing(false)}>
                             <Text style={styles.cancelText}>Cancel</Text>
                         </TouchableOpacity>
                         
-                        {/* Save Button */}
                         <TouchableOpacity style={styles.saveBtn} onPress={handleSaveFeedback} disabled={saving}>
                             <Save size={16} color="#FFF" />
                             <Text style={styles.saveText}>{saving ? "Saving..." : "Save"}</Text>
@@ -165,7 +162,7 @@ export default function SessionLogDetailScreen({ route, navigation }) {
             )}
         </View>
 
-        {/* ... (Player Notes and Drill Breakdown remain the same) ... */}
+        {/* Player Notes */}
         {sessionLog.notes && (
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Athlete Notes</Text>
@@ -176,11 +173,13 @@ export default function SessionLogDetailScreen({ route, navigation }) {
             </View>
         )}
 
+        {/* Drill Breakdown */}
         <View style={styles.section}>
             <Text style={styles.sectionTitle}>Drill Performance</Text>
             {sessionLog.drill_performances && sessionLog.drill_performances.length > 0 ? (
                 sessionLog.drill_performances.map((perf, index) => (
-                    <View key={index} style={styles.drillRow}>
+                    // ✅ Apply opacity if the drill was skipped
+                    <View key={index} style={[styles.drillRow, perf.outcome === 'skipped' && { opacity: 0.6 }]}>
                         <View style={styles.drillInfo}>
                             <Text style={styles.drillName}>{perf.drill_name || "Drill " + (index + 1)}</Text>
                             {perf.achieved_value > 0 && (
@@ -190,10 +189,16 @@ export default function SessionLogDetailScreen({ route, navigation }) {
                             )}
                         </View>
                         <View style={styles.drillStatus}>
+                            {/* ✅ Updated to handle success, skipped, and default failure */}
                             {perf.outcome === 'success' ? (
                                 <View style={[styles.statusBadge, {backgroundColor: '#DCFCE7'}]}>
                                     <CheckCircle size={14} color="#16A34A"/>
                                     <Text style={[styles.statusText, {color: '#16A34A'}]}>PASSED</Text>
+                                </View>
+                            ) : perf.outcome === 'skipped' ? (
+                                <View style={[styles.statusBadge, {backgroundColor: '#F1F5F9'}]}>
+                                    <XCircle size={14} color="#64748B"/>
+                                    <Text style={[styles.statusText, {color: '#64748B'}]}>SKIPPED</Text>
                                 </View>
                             ) : (
                                 <View style={[styles.statusBadge, {backgroundColor: '#FEE2E2'}]}>
@@ -237,7 +242,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 4 },
 
   section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' }, // Removed bottom margin to handle row alignment
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A' }, 
   
   // Feedback Styles
   feedbackInputBox: { backgroundColor: '#FFF', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' },

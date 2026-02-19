@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image, Pressable, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2 } from 'lucide-react-native';
+import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2, AlertCircle } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import api from '../services/api';
 import { ASSESSMENT_DRILLS } from '../constants/data';
@@ -22,6 +22,48 @@ const getDifficultyColor = (level) => {
     case 'beginner': return { bg: '#DCFCE7', text: '#16A34A', border: '#BBF7D0' }; 
     default: return { bg: '#F3F4F6', text: '#6B7280', border: '#E5E7EB' }; 
   }
+};
+
+// --- COMPONENT: Hold to End Button ---
+const HoldToEndButton = ({ onComplete }) => {
+  const fillAnimation = useRef(new Animated.Value(0)).current;
+
+  const handlePressIn = () => {
+    Animated.timing(fillAnimation, {
+      toValue: 1,
+      duration: 1000, // 1 second hold
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    fillAnimation.stopAnimation();
+    fillAnimation.setValue(0);
+  };
+
+  const widthInterpolation = fillAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%']
+  });
+
+  return (
+    <Pressable 
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      onLongPress={() => {
+        handlePressOut(); // Reset animation instantly
+        onComplete();
+      }}
+      delayLongPress={1000} 
+      style={styles.holdBtnContainer}
+    >
+      <Animated.View style={[styles.holdBtnFill, { width: widthInterpolation }]} />
+      <View style={styles.holdBtnContent}>
+        <AlertCircle size={18} color="#EF4444" style={{ marginRight: 8 }} />
+        <Text style={styles.holdBtnText}>Hold to End Session</Text>
+      </View>
+    </Pressable>
+  );
 };
 
 export default function SessionScreen({ route, navigation }) {
@@ -47,7 +89,7 @@ export default function SessionScreen({ route, navigation }) {
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [achievedValue, setAchievedValue] = useState('');
 
-  // 1. Identify current item (Using currentSession state)
+  // 1. Identify current item
   const currentItem = currentSession?.items ? currentSession.items[currentDrillIndex] : null;
 
   // 2. Look up global definition
@@ -128,6 +170,31 @@ export default function SessionScreen({ route, navigation }) {
     }
   };
 
+  // Skip straight to summary to save progress made so far
+  const handleEndEarly = () => {
+    setIsTimerRunning(false);
+    clearInterval(timerRef.current);
+    
+    // ✅ NEW: Auto-log remaining drills as "skipped"
+    if (currentSession && currentSession.items) {
+      const skippedLogs = [];
+      for (let i = currentDrillIndex; i < currentSession.items.length; i++) {
+        const item = currentSession.items[i];
+        skippedLogs.push({
+          drill_id: item.drill_id || item.drillId || item.id || "unknown_drill",
+          outcome: 'skipped',
+          achieved_value: 0
+        });
+      }
+      setDrillLogs(prev => [...prev, ...skippedLogs]);
+    }
+
+    // ✅ NEW: Auto-append to notes to explicitly state it was cancelled early
+    setNotes(prev => (prev ? "[Ended Prematurely]\n" + prev : "[Ended Prematurely]"));
+
+    setViewState('SUMMARY');
+  };
+
   const saveSession = async () => {
     try {
       const endTime = new Date();
@@ -150,7 +217,6 @@ export default function SessionScreen({ route, navigation }) {
 
       await api.post('/sessions', payload);
       
-      // ✅ Correct Navigation: Pass programId to trigger logic in Summary Screen
       navigation.replace('SessionSummary', { 
           session: currentSession, 
           programId: programId 
@@ -270,11 +336,12 @@ export default function SessionScreen({ route, navigation }) {
             )}
           </ScrollView>
 
-          <View style={styles.footer}>
+          <View style={styles.verticalFooter}>
             <TouchableOpacity style={[styles.startBtn, {width: '100%'}]} onPress={handleStartDrill}>
               <Text style={styles.startBtnText}>Start Drill</Text>
               <Play size={18} color="#FFF" fill="currentColor" style={{marginLeft: 8}} />
             </TouchableOpacity>
+            <HoldToEndButton onComplete={handleEndEarly} />
           </View>
         </SafeAreaView>
       </View>
@@ -312,11 +379,12 @@ export default function SessionScreen({ route, navigation }) {
             </TouchableOpacity>
           </View>
 
-          <View style={{width: '100%', paddingHorizontal: 24}}>
+          <View style={{width: '100%', paddingHorizontal: 24, gap: 12}}>
               <TouchableOpacity style={styles.finishDrillBtn} onPress={handleFinishDrill}>
                 <Check color="#FFF" size={24} />
                 <Text style={styles.finishDrillText}>Complete Drill</Text>
               </TouchableOpacity>
+              <HoldToEndButton onComplete={handleEndEarly} />
           </View>
         </SafeAreaView>
       </View>
@@ -327,45 +395,51 @@ export default function SessionScreen({ route, navigation }) {
   if (viewState === 'FEEDBACK') {
     return (
       <View style={[styles.container, { backgroundColor: '#F1F5F9' }]}>
-        <SafeAreaView style={{flex: 1, justifyContent: 'center', padding: 24}}>
-            <View style={styles.feedbackCard}>
-                <Text style={styles.feedbackHeader}>Drill Complete!</Text>
-                <Text style={styles.feedbackSub}>{currentItem.drill_name}</Text>
+        <SafeAreaView style={{flex: 1}}>
+          <ScrollView contentContainerStyle={{flexGrow: 1, justifyContent: 'center', padding: 24}}>
+              <View style={styles.feedbackCard}>
+                  <Text style={styles.feedbackHeader}>Drill Complete!</Text>
+                  <Text style={styles.feedbackSub}>{currentItem.drill_name}</Text>
 
-                <View style={styles.divider} />
+                  <View style={styles.divider} />
 
-                {drillScoring ? (
-                    <View style={{width: '100%', marginBottom: 24}}>
-                        <Text style={styles.numericPrompt}>{drillScoring.prompt}</Text>
-                        {drillScoring.target && (
-                            <Text style={styles.targetLabel}>Target: {drillScoring.target}</Text>
-                        )}
-                        <TextInput
-                            style={styles.numericInput}
-                            keyboardType="numeric"
-                            value={achievedValue}
-                            onChangeText={setAchievedValue}
-                            placeholder="0"
-                            placeholderTextColor="#94A3B8"
-                            autoFocus={true}
-                        />
-                    </View>
-                ) : (
-                    <Text style={[styles.numericPrompt, {marginBottom: 24}]}>How did you perform?</Text>
-                )}
+                  {drillScoring ? (
+                      <View style={{width: '100%', marginBottom: 24}}>
+                          <Text style={styles.numericPrompt}>{drillScoring.prompt}</Text>
+                          {drillScoring.target && (
+                              <Text style={styles.targetLabel}>Target: {drillScoring.target}</Text>
+                          )}
+                          <TextInput
+                              style={styles.numericInput}
+                              keyboardType="numeric"
+                              value={achievedValue}
+                              onChangeText={setAchievedValue}
+                              placeholder="0"
+                              placeholderTextColor="#94A3B8"
+                              autoFocus={true}
+                          />
+                      </View>
+                  ) : (
+                      <Text style={[styles.numericPrompt, {marginBottom: 24}]}>How did you perform?</Text>
+                  )}
 
-                <View style={styles.feedbackGrid}>
-                    <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#FEE2E2', borderColor: '#FECACA'}]} onPress={() => completeDrill('fail')}>
-                        <ThumbsDown color="#DC2626" size={28} />
-                        <Text style={[styles.feedbackBtnText, {color: '#DC2626'}]}>Struggled</Text>
-                    </TouchableOpacity>
+                  <View style={styles.feedbackGrid}>
+                      <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#FEE2E2', borderColor: '#FECACA'}]} onPress={() => completeDrill('fail')}>
+                          <ThumbsDown color="#DC2626" size={28} />
+                          <Text style={[styles.feedbackBtnText, {color: '#DC2626'}]}>Struggled</Text>
+                      </TouchableOpacity>
 
-                    <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#DCFCE7', borderColor: '#BBF7D0'}]} onPress={() => completeDrill('success')}>
-                        <ThumbsUp color="#16A34A" size={28} />
-                        <Text style={[styles.feedbackBtnText, {color: '#16A34A'}]}>Nailed It</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
+                      <TouchableOpacity style={[styles.feedbackBtn, {backgroundColor: '#DCFCE7', borderColor: '#BBF7D0'}]} onPress={() => completeDrill('success')}>
+                          <ThumbsUp color="#16A34A" size={28} />
+                          <Text style={[styles.feedbackBtnText, {color: '#16A34A'}]}>Nailed It</Text>
+                      </TouchableOpacity>
+                  </View>
+              </View>
+          </ScrollView>
+
+          <View style={{paddingHorizontal: 24, paddingBottom: 16}}>
+             <HoldToEndButton onComplete={handleEndEarly} />
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -449,7 +523,7 @@ const styles = StyleSheet.create({
   getReadyText: { fontSize: 24, fontWeight: '800', color: 'rgba(255,255,255,0.8)', letterSpacing: 2, marginTop: 20 },
 
   // ACTIVE VIEW
-  activeContent: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'space-between', paddingBottom: 40 },
+  activeContent: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'space-between', paddingBottom: 24 },
   timerCircle: { width: 300, height: 300, borderRadius: 150, borderWidth: 8, borderColor: '#15803D', alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617' },
   timerText: { fontSize: 80, fontWeight: '800', color: '#FFF', fontVariant: ['tabular-nums'] },
   playPauseBtn: { marginTop: 20, backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 60 },
@@ -472,6 +546,7 @@ const styles = StyleSheet.create({
 
   // Footer & Common
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E2E8F0', padding: 16, flexDirection: 'row', gap: 12, paddingBottom: 32, ...SHADOWS.medium },
+  verticalFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#E2E8F0', padding: 16, gap: 12, paddingBottom: 32, ...SHADOWS.medium },
   exitBtn: { flex: 1, backgroundColor: '#334155', padding: 16, borderRadius: 12, alignItems: 'center' },
   exitBtnText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
   startBtn: { flex: 2, backgroundColor: COLORS.primary, padding: 16, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
@@ -484,4 +559,34 @@ const styles = StyleSheet.create({
   rpeBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   rpeText: { fontWeight: '700', fontSize: 16, color: '#64748B' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // Hold to End Button
+  holdBtnContainer: {
+    height: 56,
+    backgroundColor: '#FEF2F2', // Light red wrapper
+    borderRadius: 16,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    width: '100%',
+  },
+  holdBtnFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#FECACA', // Fill color progress
+  },
+  holdBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  holdBtnText: {
+    color: '#EF4444',
+    fontWeight: '700',
+    fontSize: 16,
+  }
 });

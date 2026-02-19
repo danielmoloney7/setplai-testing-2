@@ -41,6 +41,8 @@ class Program(Base):
     program_type = Column(String(50), default="PLAYER_PLAN") # 'PLAYER_PLAN' or 'SQUAD_SESSION'
     squad_id = Column(String, nullable=True) # Linked Squad for Coach Programs
     
+    status = Column(String(50), default="ACTIVE")
+    
     # Relationships
     sessions = relationship("ProgramSession", back_populates="program")
     creator = relationship("User", back_populates="created_programs")

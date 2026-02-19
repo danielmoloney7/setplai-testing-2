@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload 
 from sqlalchemy import func, desc
 from typing import List, Optional, Dict, Any
@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.models.training import Drill, Program, ProgramAssignment, ProgramSession, SessionLog, DrillPerformance, generate_id, MatchEntry
 from app.models.user import User, SquadMember, Notification, Squad
 from app.core.security import get_current_user
+from app.api.v1.matches import create_notification
 import uuid
 
 
@@ -274,38 +275,28 @@ def get_programs(
 @router.post("/programs")
 def create_program(
     program_in: ProgramCreateSchema, 
+    background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        print(f"📝 CREATING PROGRAM: {program_in.title} (Type: {program_in.program_type})")
-
-        # Auto-Detect Squad ID if missing
-        final_squad_id = program_in.squad_id
-        if not final_squad_id and program_in.assigned_to:
-            for target_id in program_in.assigned_to:
-                if target_id == "SELF": continue
-                squad_exists = db.query(Squad).filter(Squad.id == target_id).first()
-                if squad_exists:
-                    final_squad_id = squad_exists.id
-                    break
-
+        # 1. Create the Program Record
         new_program = Program(
             title=program_in.title,
             description=program_in.description,
             creator_id=current_user.id,
             created_at=datetime.utcnow(),
             program_type=program_in.program_type, 
-            squad_id=final_squad_id,
-            status="ACTIVE" 
+            squad_id=program_in.squad_id,
+            status=program_in.status if program_in.status else "ACTIVE" # ✅ Set initial status
         )
         db.add(new_program)
         db.commit()
         db.refresh(new_program)
 
+        # 2. Add Sessions & Drills
         for sess in program_in.sessions:
             for drill in sess.drills: 
-                t_prompt = drill.target_prompt if hasattr(drill, 'target_prompt') else None
                 db_session = ProgramSession(
                     program_id=new_program.id,
                     day_order=sess.day,
@@ -314,13 +305,45 @@ def create_program(
                     duration_minutes=drill.duration,
                     notes=drill.notes or "",
                     target_value=drill.target_value,
-                    target_prompt=t_prompt
+                    target_prompt=drill.target_prompt
                 )
                 db.add(db_session)
 
+        # 3. ✅ AUTO-COMPLETE EXISTING SQUAD PROGRAMS OF THE SAME TYPE
+        if program_in.squad_id:
+            old_programs = db.query(Program).filter(
+                Program.squad_id == program_in.squad_id,
+                Program.program_type == program_in.program_type, # ✅ CRITICAL: Only match the same type
+                Program.id != new_program.id,
+                Program.status != "COMPLETED"
+            ).all()
+            
+            for old_p in old_programs:
+                # Mark the program itself as completed
+                old_p.status = "COMPLETED"
+                
+                # If it's a PLAYER_PLAN, we must also complete the individual player assignments
+                if program_in.program_type == "PLAYER_PLAN":
+                    active_assignments = db.query(ProgramAssignment).filter(
+                        ProgramAssignment.program_id == old_p.id,
+                        ProgramAssignment.status.in_(["ACTIVE", "PENDING"])
+                    ).all()
+                    
+                    for assignment in active_assignments:
+                        assignment.status = "COMPLETED"
+                        
+                        # Notify the player that the old program was replaced
+                        background_tasks.add_task(
+                            create_notification, db, assignment.player_id, 
+                            "Program Completed! 🎉", 
+                            f"Your squad finished '{old_p.title}'. A new plan has been assigned!", 
+                            "PROGRAM_COMPLETE", assignment.program_id
+                        )
+
+        # 4. Handle New Assignments (Only for PLAYER_PLAN)
         if program_in.program_type == "PLAYER_PLAN":
-            raw_targets = program_in.assigned_to
             final_player_ids = set()
+            raw_targets = program_in.assigned_to
 
             if not raw_targets or "SELF" in raw_targets:
                 final_player_ids.add(current_user.id)
@@ -340,26 +363,24 @@ def create_program(
                 if str(player_id) == str(current_user.id) or program_in.status == "ACTIVE":
                     final_status = "ACTIVE"
 
-                assignment = ProgramAssignment(
+                new_assignment = ProgramAssignment(
                     program_id=new_program.id,
                     player_id=str(player_id),
                     coach_id=current_user.id,
                     status=final_status,
                     assigned_at=datetime.utcnow()
                 )
-                db.add(assignment)
+                db.add(new_assignment)
                 
+                # Notify player of NEW program
                 if str(player_id) != str(current_user.id):
-                    notif = Notification(
-                        id=str(uuid.uuid4()),
-                        user_id=str(player_id),
-                        title="New Program Assigned",
-                        message=f"Coach assigned you a new program: {program_in.title}",
-                        type="PROGRAM_INVITE",
-                        reference_id=new_program.id
+                     background_tasks.add_task(
+                        create_notification, db, player_id, 
+                        "New Program Assigned", 
+                        f"Coach assigned a new program: {new_program.title}", 
+                        "PROGRAM_ASSIGNED", new_program.id
                     )
-                    db.add(notif)
-        
+
         db.commit()
         return {"status": "success", "program_id": new_program.id}
 
