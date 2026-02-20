@@ -15,6 +15,7 @@ import FeedCard from '../components/FeedCard';
 
 export default function DashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState({ name: 'Athlete', role: 'PLAYER', id: null }); 
   
@@ -51,7 +52,9 @@ export default function DashboardScreen({ navigation }) {
   }, [isGeneratingSuggestion]);
 
   // --- DATA LOADING ---
-  const loadDashboard = async () => {
+  const loadDashboard = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) setIsRefreshing(true);
+    else if (!user.name) setLoading(true);
     try {
         const [role, name, storedId] = await Promise.all([
             AsyncStorage.getItem('user_role'),
@@ -85,7 +88,7 @@ export default function DashboardScreen({ navigation }) {
         console.log("Dashboard Error:", error);
     } finally {
         setLoading(false); 
-        setRefreshing(false); 
+        setIsRefreshing(false);
     }
   };
 
@@ -163,7 +166,11 @@ export default function DashboardScreen({ navigation }) {
       setRecentActivity(activityData || []);
   };
 
-  useFocusEffect(useCallback(() => { loadDashboard(); }, []));
+  useFocusEffect(
+    useCallback(() => { 
+        loadDashboard(false); }, 
+        [])
+    );
 
   const generateSuggestion = async (profile, logs, userId) => {
     if (!userId) return;
@@ -553,7 +560,7 @@ export default function DashboardScreen({ navigation }) {
 
       <ScrollView 
         contentContainerStyle={styles.scrollContent} 
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadDashboard(true)} />}
       >
         {loading && !suggestedProgram ? <ActivityIndicator size="large" color={COLORS.primary} style={{marginTop: 50}} /> : 
             (user.role.includes('COACH') ? renderCoachView() : renderPlayerView())

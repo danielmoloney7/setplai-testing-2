@@ -13,6 +13,7 @@ export default function ProgramsListScreen({ navigation }) {
   const [archivedPrograms, setArchivedPrograms] = useState([]); 
   const [viewMode, setViewMode] = useState('ACTIVE'); 
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useFocusEffect(useCallback(() => { loadData(); }, []));
 
@@ -37,8 +38,12 @@ export default function ProgramsListScreen({ navigation }) {
       return st;
   };
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) {
+      setIsRefreshing(true);
+  }
+    // setLoading(true);
+    
     try {
         const storedRole = await AsyncStorage.getItem('user_role');
         const currentRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
@@ -79,6 +84,7 @@ export default function ProgramsListScreen({ navigation }) {
         console.log("Error loading programs", e);
     } finally {
         setLoading(false);
+        setIsRefreshing(false);
     }
   };
   
@@ -195,10 +201,14 @@ export default function ProgramsListScreen({ navigation }) {
 
       <FlatList 
         data={viewMode === 'ACTIVE' ? programs : archivedPrograms} 
-        renderItem={renderItem}
         keyExtractor={item => item.id.toString()}
+        renderItem={renderItem}
         contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+        refreshing={isRefreshing} 
+        onRefresh={() => loadData(true)}
+        
+       
+        // refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
         ListEmptyComponent={
             <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>

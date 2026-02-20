@@ -11,10 +11,13 @@ import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function ProgressScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [history, setHistory] = useState([]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) setIsRefreshing(true);
+    else if (history.length === 0) setLoading(true);
+
     try {
       const data = await fetchMyHistory();
       setHistory(data || []);
@@ -22,12 +25,13 @@ export default function ProgressScreen({ navigation }) {
       console.log(e);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      loadData(false);
     }, [])
   );
 
@@ -93,7 +97,7 @@ export default function ProgressScreen({ navigation }) {
           keyExtractor={item => item.id}
           renderItem={({ item }) => <FeedCard session={item} />}
           contentContainerStyle={{ paddingBottom: 100 }}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />}
           ListHeaderComponent={renderHeader} // ✅ Added Header here to scroll with list
           ListEmptyComponent={
             <View style={styles.emptyContainer}>

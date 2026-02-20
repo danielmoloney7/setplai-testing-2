@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, File, UploadFile
 from sqlalchemy.orm import Session, joinedload 
 from sqlalchemy import func, desc
 from typing import List, Optional, Dict, Any
@@ -11,6 +11,8 @@ from app.models.user import User, SquadMember, Notification, Squad
 from app.core.security import get_current_user
 from app.api.v1.matches import create_notification
 import uuid
+import shutil
+import os
 
 
 router = APIRouter()
@@ -63,12 +65,14 @@ class SessionLogCreate(BaseModel):
     duration_minutes: int
     rpe: int
     notes: Optional[str] = None
+    photo_url: Optional[str] = None
     drill_performances: List[DrillPerformanceCreate] = []
 
 class SessionLogSchema(SessionLogCreate):
     id: str
     player_id: str
     date_completed: datetime 
+    photo_url: Optional[str] = None
     drill_performances: List[DrillPerformanceSchema] = []
     coach_feedback: Optional[str] = None
     coach_liked: bool = False
@@ -522,6 +526,7 @@ def create_session_log(
         duration_minutes=session_data.duration_minutes,
         rpe=session_data.rpe,
         notes=session_data.notes,
+        photo_url=session_data.photo_url,
         date_completed=datetime.utcnow()
     )
     db.add(new_log)
@@ -793,3 +798,20 @@ def disconnect_coach(
     
     db.commit()
     return {"status": "success", "message": "Disconnected from coach and squads."}
+
+# ✅ ADD THIS NEW ENDPOINT
+@router.post("/upload")
+async def upload_image(file: UploadFile = File(...)):
+    try:
+        os.makedirs("uploads", exist_ok=True)
+        file_ext = file.filename.split(".")[-1]
+        unique_name = f"{generate_id()}.{file_ext}"
+        file_location = f"uploads/{unique_name}"
+        
+        with open(file_location, "wb+") as file_object:
+            shutil.copyfileobj(file.file, file_object)
+            
+        return {"url": f"/uploads/{unique_name}"}
+    except Exception as e:
+        print(f"Upload error: {e}")
+        raise HTTPException(status_code=500, detail="Could not upload file")

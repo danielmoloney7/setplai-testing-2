@@ -26,6 +26,7 @@ export default function ProfileScreen({ navigation }) {
   
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Coach Linking State
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -36,8 +37,9 @@ export default function ProfileScreen({ navigation }) {
   const [requests, setRequests] = useState([]);
 
   // Load User Data
-  const loadUser = async () => {
-    setLoading(true);
+  const loadUser = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) setIsRefreshing(true);
+    else if (user.name === 'Loading...') setLoading(true);
     try {
         const data = await fetchUserProfile();
         if (data) {
@@ -62,6 +64,7 @@ export default function ProfileScreen({ navigation }) {
         console.log("Profile Load Error:", e);
     } finally {
         setLoading(false);
+        setIsRefreshing(false);
     }
   };
 
@@ -334,7 +337,7 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={loading} onRefresh={loadUser} />}>
+      <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadUser(true) } />}>
         {renderHeader()}
         {user.role === 'PLAYER' ? renderPlayerSettings() : renderCoachDashboard()}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>

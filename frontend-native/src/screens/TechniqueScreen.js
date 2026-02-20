@@ -6,11 +6,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { fetchProLibrary, fetchUserVideos, uploadUserVideo } from '../services/api';
 import api from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TechniqueScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('pro'); // 'pro' | 'my'
   const [proVideos, setProVideos] = useState([]);
   const [myVideos, setMyVideos] = useState([]);
+  const [role, setRole] = useState('PLAYER');
   const [loading, setLoading] = useState(true);
   
   // Selection Mode
@@ -18,7 +20,17 @@ export default function TechniqueScreen({ navigation }) {
   const [selectedVideos, setSelectedVideos] = useState([]); // Max 2
 
   useEffect(() => {
-    loadData();
+    const initialize = async () => {
+      try {
+        const storedRole = await AsyncStorage.getItem('user_role');
+        if (storedRole) setRole(storedRole.toUpperCase());
+      } catch (e) {
+        console.error("Error fetching role", e);
+      }
+      loadData();
+    };
+    
+    initialize();
   }, []);
 
   const loadData = async () => {
@@ -115,7 +127,7 @@ export default function TechniqueScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={role === 'COACH' ? [] : ['top']}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Technique Lab</Text>
@@ -175,7 +187,7 @@ const styles = StyleSheet.create({
   uploadBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, gap: 6 },
   uploadText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
   
-  tabs: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 10 },
+  tabs: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 10, marginTop: 16 },
   tab: { marginRight: 20, paddingBottom: 10 },
   activeTab: { borderBottomWidth: 2, borderBottomColor: COLORS.primary },
   tabText: { fontSize: 15, color: '#64748B', fontWeight: '600' },

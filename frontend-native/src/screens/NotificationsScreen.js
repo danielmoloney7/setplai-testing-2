@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
-  ChevronLeft, Bell, Calendar, Users, Info, Check, XCircle, CheckCircle, 
+  ChevronLeft, Bell, Calendar, Users, User, Info, Check, XCircle, CheckCircle, 
   Trophy, MessageSquare, ClipboardList, Activity 
 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
@@ -14,10 +14,12 @@ import { fetchNotifications, markNotificationRead, fetchMatches, respondToCoachR
 export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [navigating, setNavigating] = useState(false); 
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) setIsRefreshing(true);
+    else if (notifications.length === 0) setLoading(true);
     try {
         const data = await fetchNotifications();
         setNotifications(data);
@@ -25,10 +27,14 @@ export default function NotificationsScreen({ navigation }) {
         console.error("Notif Error", e);
     } finally {
         setLoading(false);
+        setIsRefreshing(false);
     }
   };
 
-  useFocusEffect(useCallback(() => { loadData(); }, []));
+  useFocusEffect(useCallback(() => { 
+    loadData(false); }, 
+    [])
+);
 
   const handlePress = async (item) => {
       // 1. Mark read (if it's a simple tap and not an action button)
@@ -195,7 +201,7 @@ export default function NotificationsScreen({ navigation }) {
         renderItem={renderItem}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />}
         ListEmptyComponent={
             <View style={styles.center}>
                 <Bell size={48} color="#CBD5E1" />

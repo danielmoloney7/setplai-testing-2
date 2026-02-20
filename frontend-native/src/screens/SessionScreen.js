@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image, Pressable, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2, AlertCircle } from 'lucide-react-native';
+import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2, AlertCircle, Camera, X } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import api from '../services/api';
+import api, { uploadImage } from '../services/api';
 import { ASSESSMENT_DRILLS } from '../constants/data';
 import EditSessionModal from '../components/EditSessionModal';
+import * as ImagePicker from 'expo-image-picker';
 
 // --- HELPER: Format Time ---
 const formatTime = (seconds) => {
@@ -89,6 +90,9 @@ export default function SessionScreen({ route, navigation }) {
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [achievedValue, setAchievedValue] = useState('');
 
+  const [photoUri, setPhotoUri] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
   // 1. Identify current item
   const currentItem = currentSession?.items ? currentSession.items[currentDrillIndex] : null;
 
@@ -148,6 +152,25 @@ export default function SessionScreen({ route, navigation }) {
     setViewState('FEEDBACK'); 
   };
 
+  const takePhoto = async () => {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+          Alert.alert('Permission Required', 'We need camera permissions to snap your victory photo!');
+          return;
+      }
+      
+      let result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [16, 9],
+          quality: 0.5,
+      });
+
+      if (!result.canceled) {
+          setPhotoUri(result.assets[0].uri);
+      }
+  };
+
   const completeDrill = (outcome) => {
     if (!currentItem) return;
 
@@ -192,7 +215,17 @@ export default function SessionScreen({ route, navigation }) {
   };
 
   const saveSession = async () => {
+    setIsUploading(true);
     try {
+      let finalPhotoUrl = null;
+      if (photoUri) {
+          try {
+              finalPhotoUrl = await uploadImage(photoUri);
+          } catch(e) {
+              Alert.alert("Upload Failed", "Couldn't upload photo, saving session without it.");
+          }
+      }
+    
       const endTime = new Date();
       const startTime = sessionStartTime || endTime;
       const duration = Math.round((endTime - startTime) / 60000) || 1;
@@ -208,6 +241,7 @@ export default function SessionScreen({ route, navigation }) {
         duration_minutes: duration,
         rpe: rpe,
         notes: notes,
+        photo_url: finalPhotoUrl,
         drill_performances: safeLogs
       };
 
@@ -494,6 +528,21 @@ export default function SessionScreen({ route, navigation }) {
             />
           </View>
 
+          <Text style={styles.label}>Post-Session Photo</Text>
+            {photoUri ? (
+                <View style={styles.photoPreviewContainer}>
+                    <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+                    <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)}>
+                        <X color="#FFF" size={16} />
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <TouchableOpacity style={styles.addPhotoBtn} onPress={takePhoto}>
+                    <Camera size={24} color={COLORS.primary} />
+                    <Text style={styles.addPhotoText}>Snap a Victory Pic</Text>
+                </TouchableOpacity>
+            )}
+
           <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession}>
             <Text style={styles.startBtnText}>Save & Finish</Text>
           </TouchableOpacity>
@@ -519,6 +568,13 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: 16, marginBottom: 24 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 14, color: '#64748B', fontWeight: '500' },
+
+  // Photo styles
+  addPhotoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 20, borderRadius: 12, borderWidth: 2, borderColor: COLORS.primary, borderStyle: 'dashed', backgroundColor: '#F0FDF4' },
+  addPhotoText: { color: COLORS.primary, fontWeight: '700', fontSize: 16 },
+  photoPreviewContainer: { width: '100%', aspectRatio: 16/9, borderRadius: 12, overflow: 'hidden', position: 'relative' },
+  photoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
+  removePhotoBtn: { position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.6)', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 
   // Drill List
   listContainer: { gap: 12 },

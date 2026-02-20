@@ -38,6 +38,7 @@ export default function DrillLibraryScreen({ navigation, route }) {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // ✅ TACTICS BOARD STATE
   const [showBoard, setShowBoard] = useState(false);
@@ -59,7 +60,11 @@ export default function DrillLibraryScreen({ navigation, route }) {
     media_url: null // ✅ ADDED FIELD
   });
 
-  const loadDrills = async () => {
+  const loadDrills = async (isPullToRefresh = false) => {
+    if (isPullToRefresh) {
+      setIsRefreshing(true);
+    }
+  
     try {
       const data = await fetchDrills();
       setDrills(data);
@@ -67,14 +72,14 @@ export default function DrillLibraryScreen({ navigation, route }) {
       console.log("Failed to load drills");
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => { loadDrills(); }, []);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
+    setIsRefreshing(true);
     loadDrills();
   }, []);
 
@@ -208,7 +213,7 @@ export default function DrillLibraryScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Drill Library</Text>
         <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
@@ -247,7 +252,8 @@ export default function DrillLibraryScreen({ navigation, route }) {
           keyExtractor={item => item.id.toString()}
           renderItem={renderDrillItem}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshing={isRefreshing} 
+          onRefresh={() => loadDrills(true)}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Dumbbell size={48} color="#E2E8F0" />
@@ -439,7 +445,7 @@ export default function DrillLibraryScreen({ navigation, route }) {
         <TacticsBoard onSave={handleSaveDiagram} onClose={() => setShowBoard(false)} />
     </Modal>
 
-    </SafeAreaView>
+    </View>
   );
 }
 

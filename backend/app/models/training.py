@@ -108,11 +108,11 @@ class SessionLog(Base):
     duration_minutes = Column(Integer)
     rpe = Column(Integer) 
     notes = Column(String, nullable=True)
-    
-    # ✅ NEW FIELDS: Coach Interaction
+    photo_url = Column(String(500), nullable=True)
+
     coach_feedback = Column(Text, nullable=True)
     coach_liked = Column(Boolean, default=False)
-    
+
     # Relationships
     player = relationship("User", back_populates="session_logs")
     program = relationship("Program")

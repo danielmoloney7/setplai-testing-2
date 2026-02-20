@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, Clock, Activity, Calendar, CheckCircle, XCircle, FileText, User, Heart, MessageSquare, Save, Edit2 } from 'lucide-react-native'; 
 import { COLORS, SHADOWS } from '../constants/theme';
-import { submitSessionFeedback } from '../services/api';
+import api, { submitSessionFeedback } from '../services/api';
 
 export default function SessionLogDetailScreen({ route, navigation }) {
   const { sessionLog } = route.params;
@@ -18,6 +18,13 @@ export default function SessionLogDetailScreen({ route, navigation }) {
   // Control Edit Mode
   // If feedback exists, start closed (false). If empty, start open (true).
   const [isEditing, setIsEditing] = useState(!sessionLog.coach_feedback);
+
+  const getFullImageUrl = (path) => {
+      if (!path) return null;
+      if (path.startsWith('http')) return path;
+      const baseUrl = api.defaults.baseURL.replace('/api/v1', '');
+      return `${baseUrl}${path}`;
+  };
 
   useEffect(() => {
       AsyncStorage.getItem('user_role').then(r => {
@@ -81,6 +88,10 @@ export default function SessionLogDetailScreen({ route, navigation }) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {sessionLog.photo_url && (
+            <Image source={{ uri: getFullImageUrl(sessionLog.photo_url) }} style={styles.heroImage} />
+        )}
+
         {/* Overview Card */}
         <View style={styles.overviewCard}>
           <View style={styles.programBadge}>
@@ -227,6 +238,8 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   likeBtn: { padding: 4 },
   content: { padding: 24, paddingBottom: 60 },
+
+  heroImage: { width: '100%', height: 250, borderRadius: 16, marginBottom: 20, backgroundColor: '#E2E8F0', resizeMode: 'cover' },
 
   overviewCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.medium },
   programBadge: { alignSelf: 'flex-start', backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 8 },

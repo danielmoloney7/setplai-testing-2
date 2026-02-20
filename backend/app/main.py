@@ -12,7 +12,6 @@ from app.models import technique as technique_models
 
 import os
 
-
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
 
@@ -20,6 +19,10 @@ app = FastAPI()
 
 os.makedirs("static", exist_ok=True) # Ensure it exists
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ✅ NEW: Ensure uploads directory exists and mount it for session photos
+os.makedirs("uploads", exist_ok=True) 
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,

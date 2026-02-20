@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native'; 
 // ✅ FIX: Added 'Heart' to imports
 import { Clock, Activity, ThumbsUp, ThumbsDown, Calendar, Heart } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
+import api from '../services/api'; //
 
 export default function FeedCard({ session }) {
   const navigation = useNavigation();
@@ -16,6 +17,13 @@ export default function FeedCard({ session }) {
   // Calculate stats from the drill_performances array
   const nailedCount = session.drill_performances?.filter(p => p.outcome === 'success').length || 0;
   const struggleCount = session.drill_performances?.filter(p => p.outcome === 'fail').length || 0;
+
+  const getFullImageUrl = (path) => {
+      if (!path) return null;
+      if (path.startsWith('http')) return path;
+      const baseUrl = api.defaults.baseURL.replace('/api/v1', '');
+      return `${baseUrl}${path}`;
+  };
 
   const handlePress = () => {
     navigation.navigate('SessionLogDetail', { sessionLog: session });
@@ -45,6 +53,10 @@ export default function FeedCard({ session }) {
           <Text style={styles.durationText}>{session.duration_minutes || 0} min</Text>
         </View>
       </View>
+
+      {session.photo_url && (
+          <Image source={{ uri: getFullImageUrl(session.photo_url) }} style={styles.feedImage} />
+      )}
 
       <View style={styles.divider} />
 
@@ -188,4 +200,11 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontStyle: 'italic',
   },
+  feedImage: {
+     width: '100%', 
+     height: 200, 
+     borderRadius: 12, 
+     marginBottom: 12, 
+     backgroundColor: '#F1F5F9', 
+     resizeMode: 'cover' },
 });

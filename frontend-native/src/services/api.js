@@ -423,18 +423,56 @@ export const saveAnalysis = async (videoA, videoB, notes) => {
   return response.data;
 };
 
-export default api;
-
 export const uploadImage = async (uri) => {
-  const formData = new FormData();
-  formData.append('file', {
-    uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
-    type: 'image/png',
-    name: 'diagram.png',
-  });
+  try {
+    const formData = new FormData();
 
-  const response = await api.post('/technique/upload-image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return response.data.url;
+    if (Platform.OS === 'web') {
+      // 1. For Web: Convert the URI/Blob-URL to a real Blob object
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const filename = uri.split('/').pop() || 'upload.jpg';
+      formData.append('file', blob, filename);
+    } else {
+      // 2. For Mobile: Keep the React Native object format
+      const filename = uri.split('/').pop();
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+      formData.append('file', {
+        uri: uri,
+        name: filename,
+        type: type,
+      });
+    }
+
+    // 3. Get the token for the manual fetch call
+    const token = await AsyncStorage.getItem('access_token');
+
+    const response = await fetch(`${api.defaults.baseURL}/upload`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`, // Pass the token manually since we aren't using axios here
+        // IMPORTANT: Do NOT set 'Content-Type'
+      },
+    });
+
+    if (!response.ok) {
+      // Log the error body to see EXACTLY what the server is complaining about
+      const errorBody = await response.text();
+      console.error("Server 422 Detail:", errorBody);
+      throw new Error(`Upload failed with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.url;
+
+  } catch (error) {
+    console.error("Upload Image Error:", error);
+    throw error;
+  }
 };
+
+export default api;

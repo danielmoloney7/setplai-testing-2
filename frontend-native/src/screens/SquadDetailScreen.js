@@ -19,6 +19,7 @@ import {
 export default function SquadDetailScreen({ navigation, route }) {
   const { squad } = route.params || {};
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('OVERVIEW');
   
   // Data State
@@ -41,9 +42,10 @@ export default function SquadDetailScreen({ navigation, route }) {
   const [playerStats, setPlayerStats] = useState([]);
   const [aggPlayerProgress, setAggPlayerProgress] = useState(0);
 
-  const loadData = async () => {
+  const loadData = async (isPullToRefresh = false) => {
     if (!squad?.id) return;
-    setLoading(true);
+    if (isPullToRefresh) setIsRefreshing(true);
+    else if (members.length === 0) setLoading(true);
     
     try {
         const lbPromise = typeof fetchSquadLeaderboard === 'function' ? fetchSquadLeaderboard(squad.id) : Promise.resolve([]);
@@ -129,10 +131,11 @@ export default function SquadDetailScreen({ navigation, route }) {
         Alert.alert("Error", "Failed to load squad data.");
     } finally {
         setLoading(false);
+        setIsRefreshing(false);
     }
   };
 
-  useFocusEffect(useCallback(() => { loadData(); }, [squad]));
+  useFocusEffect(useCallback(() => { loadData(false); }, [squad]));
 
   // --- MEMBER MANAGEMENT ---
   const handleAddMember = async (playerId) => {
@@ -336,7 +339,7 @@ export default function SquadDetailScreen({ navigation, route }) {
           </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}>
+      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />}>
         <View style={styles.titleSection}>
             <Text style={styles.squadName}>{squad.name}</Text>
             <Text style={styles.squadSub}>{squad.level || 'General'} • {members.length} Members</Text>
