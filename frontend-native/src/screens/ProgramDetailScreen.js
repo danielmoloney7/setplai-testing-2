@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, ActivityIndicator } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2, User } from 'lucide-react-native';
+import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2, User, Edit2, RotateCcw } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchSessionLogs, updateProgramStatus, deleteProgram } from '../services/api';
+import { fetchSessionLogs, updateProgramStatus, deleteProgram, updateProgramAssignees, createProgram, fetchMyAthletes, fetchSquads } from '../services/api';
 
 export default function ProgramDetailScreen({ navigation, route }) {
   const { program } = route.params || {};
@@ -14,13 +14,31 @@ export default function ProgramDetailScreen({ navigation, route }) {
   const [currentStatus, setCurrentStatus] = useState(program?.status);
   const [loading, setLoading] = useState(false);
 
+  // ✅ New Assignee Modal States
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [myAthletes, setMyAthletes] = useState([]);
+  const [mySquads, setMySquads] = useState([]);
+  const [selectedTargets, setSelectedTargets] = useState([]);
+  const [isReassigning, setIsReassigning] = useState(false);
+  const [savingAssignees, setSavingAssignees] = useState(false);
+
+  // Check if program is fully done or archived
+  const isCompletedOrArchived = currentStatus === 'COMPLETED' || currentStatus === 'ARCHIVED' || program?.displayStatus === 'COMPLETED' || program?.displayStatus === 'ARCHIVED';
+
   useFocusEffect(
     useCallback(() => {
         const init = async () => {
             const storedRole = await AsyncStorage.getItem('user_role');
-            setRole(storedRole ? storedRole.toUpperCase() : 'PLAYER');
+            const userRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
+            setRole(userRole);
             
             if (program?.status) setCurrentStatus(program.status);
+
+            if (userRole === 'COACH') {
+                const [athletes, squads] = await Promise.all([fetchMyAthletes(), fetchSquads()]);
+                setMyAthletes(athletes || []);
+                setMySquads(squads || []);
+            }
 
             if (program?.id) {
                 try {
@@ -40,17 +58,87 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   if (!program) return null;
 
+  // ✅ Open Modal to Manage Athletes
+  const openManageAthletes = () => {
+      setIsReassigning(false);
+      setSelectedTargets(program.assigned_to?.map(a => a.id) || []);
+      setShowAssignModal(true);
+  };
+
+  // ✅ Open Modal to Redo & Duplicate
+  const openRedoReassign = () => {
+      setIsReassigning(true);
+      setSelectedTargets(program.assigned_to?.map(a => a.id) || []); // Pre-select previous players
+      setShowAssignModal(true);
+  };
+
+  const toggleTarget = (id) => {
+      if (selectedTargets.includes(id)) {
+          setSelectedTargets(selectedTargets.filter(t => t !== id));
+      } else {
+          setSelectedTargets([...selectedTargets, id]);
+      }
+  };
+
+  // ✅ Handle the actual saving/duplicating logic
+  const handleSaveAssignees = async () => {
+      setSavingAssignees(true);
+      try {
+          if (isReassigning) {
+              // 1. Group the flat schedule array back into Days
+              const grouped = {};
+              (program.schedule || []).forEach(s => {
+                  if (!grouped[s.day_order]) grouped[s.day_order] = [];
+                  grouped[s.day_order].push({
+                      drill_id: s.drill_id,
+                      drill_name: s.drill_name,
+                      duration: s.duration_minutes,
+                      notes: s.notes,
+                      target_value: s.target_value,
+                      target_prompt: s.target_prompt
+                  });
+              });
+              const sessionsPayload = Object.keys(grouped).map(day => ({
+                  day: parseInt(day),
+                  drills: grouped[day]
+              }));
+
+              // 2. Create the exact duplicate schema
+              const programData = {
+                  title: program.title, // Keeps the same title
+                  description: program.description,
+                  status: "ACTIVE",
+                  assigned_to: selectedTargets,
+                  program_type: program.program_type || "PLAYER_PLAN",
+                  squad_id: program.squad_id,
+                  sessions: sessionsPayload
+              };
+
+              await createProgram(programData);
+              Alert.alert("Success", "Program duplicated and reassigned to Active successfully!");
+              setShowAssignModal(false);
+              navigation.navigate('Main', { screen: 'Programs' }); // Force return to list to refresh
+          } else {
+              // Standard assignment update
+              await updateProgramAssignees(program.id, selectedTargets);
+              Alert.alert("Success", "Assignees updated successfully!");
+              setShowAssignModal(false);
+              navigation.goBack(); // Trigger refresh on previous screen
+          }
+      } catch (e) {
+          console.error("Save assignees error", e);
+          Alert.alert("Error", "Could not save assignees. Please try again.");
+      } finally {
+          setSavingAssignees(false);
+      }
+  };
+
   const handleStatusChange = async (newStatus) => {
     try {
         await updateProgramStatus(program.id, newStatus);
         setCurrentStatus(newStatus);
-        
-        if (Platform.OS === 'web') {
-            alert(newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
-        } else {
-            Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
-        }
-        
+        const msg = newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.";
+        Platform.OS === 'web' ? alert(msg) : Alert.alert("Success", msg);
         if (newStatus === 'DECLINED') navigation.goBack();
     } catch (e) {
         Alert.alert("Error", "Could not update status.");
@@ -61,8 +149,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
       if (navigation.canGoBack()) {
           navigation.goBack();
       } else {
-          const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
-          navigation.navigate('Main', { screen: targetTab });
+          navigation.navigate('Main', { screen: role === 'COACH' ? 'Programs' : 'Plans' });
       }
   };
 
@@ -70,8 +157,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
       setLoading(true);
       try {
           await deleteProgram(program.id);
-          const targetTab = role === 'COACH' ? 'Programs' : 'Plans';
-          navigation.navigate('Main', { screen: targetTab });
+          navigation.navigate('Main', { screen: role === 'COACH' ? 'Programs' : 'Plans' });
       } catch (e) {
           console.error(e);
           setLoading(false);
@@ -82,26 +168,16 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   const handleDelete = () => {
     const message = role === 'COACH' 
-        ? "Warning: Deleting this program will remove it from ALL players assigned to it. They will be notified. Are you sure?" 
+        ? "Warning: Deleting this program will remove it from ALL players assigned to it. Are you sure?" 
         : "Are you sure you want to remove this program from your plans?";
     
     if (Platform.OS === 'web') {
-        if (window.confirm(message)) {
-            performDelete();
-        }
+        if (window.confirm(message)) performDelete();
     } else {
-        Alert.alert(
-            role === 'COACH' ? "Delete Program & Notify" : "Remove Program",
-            message,
-            [
-                { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Delete", 
-                    style: "destructive", 
-                    onPress: performDelete 
-                }
-            ]
-        );
+        Alert.alert(role === 'COACH' ? "Delete Program" : "Remove Program", message, [
+            { text: "Cancel", style: "cancel" },
+            { text: "Delete", style: "destructive", onPress: performDelete }
+        ]);
     }
   };
 
@@ -112,7 +188,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
       acc[day].totalMinutes += (parseInt(item.duration_minutes || item.targetDurationMin || item.duration) || 0);
       return acc;
   }, {});
-
   const sessionList = Object.values(groupedSessions || {});
 
   const Container = Platform.OS === 'web' ? View : SafeAreaView;
@@ -124,15 +199,9 @@ export default function ProgramDetailScreen({ navigation, route }) {
           <TouchableOpacity onPress={handleReturn} style={styles.backBtn}>
               <ChevronLeft size={24} color="#334155" />
           </TouchableOpacity>
-          
           <Text style={styles.headerTitle}>Program Details</Text>
-          
           <TouchableOpacity onPress={handleDelete} style={styles.backBtn} disabled={loading}>
-              {loading ? (
-                  <ActivityIndicator size="small" color="#EF4444" />
-              ) : (
-                  <Trash2 size={24} color="#EF4444" />
-              )}
+              {loading ? <ActivityIndicator size="small" color="#EF4444" /> : <Trash2 size={24} color="#EF4444" />}
           </TouchableOpacity>
       </View>
 
@@ -147,12 +216,24 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         </View>
 
-        {/* ✅ COACH ONLY: Assignment Details */}
+        {/* ✅ COACH ONLY: Assignment Details with Smart Buttons */}
         {role === 'COACH' && (
             <View style={styles.assignmentCard}>
-                <Text style={styles.sectionTitle}>Assignments</Text>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
+                    <Text style={styles.sectionTitle}>Assignments</Text>
+                    {isCompletedOrArchived ? (
+                        <TouchableOpacity style={styles.manageBtn} onPress={openRedoReassign}>
+                            <RotateCcw size={14} color={COLORS.primary} />
+                            <Text style={styles.manageBtnText}>Redo & Reassign</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity style={styles.manageBtn} onPress={openManageAthletes}>
+                            <Edit2 size={14} color={COLORS.primary} />
+                            <Text style={styles.manageBtnText}>Manage</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 
-                {/* Squad vs Individual Indicator */}
                 {program.squad_id ? (
                     <View style={[styles.typeBadge, { backgroundColor: '#E0E7FF', borderColor: '#C7D2FE' }]}>
                         <Users size={16} color="#4F46E5" />
@@ -165,20 +246,13 @@ export default function ProgramDetailScreen({ navigation, route }) {
                     </View>
                 )}
 
-                {/* Athlete List */}
                 <View style={styles.athleteList}>
                     {program.assigned_to && program.assigned_to.length > 0 ? (
                         program.assigned_to.map((player, index) => (
                             <View key={index} style={styles.athleteRow}>
                                 <Text style={styles.athleteName}>{player.name}</Text>
-                                <View style={[
-                                    styles.statusTag, 
-                                    player.status === 'ACTIVE' ? styles.statusActive : styles.statusPending
-                                ]}>
-                                    <Text style={[
-                                        styles.statusText,
-                                        player.status === 'ACTIVE' ? styles.textActive : styles.textPending
-                                    ]}>{player.status}</Text>
+                                <View style={[styles.statusTag, player.status === 'ACTIVE' ? styles.statusActive : styles.statusPending]}>
+                                    <Text style={[styles.statusText, player.status === 'ACTIVE' ? styles.textActive : styles.textPending]}>{player.status}</Text>
                                 </View>
                             </View>
                         ))
@@ -189,7 +263,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         )}
 
-        {/* Pending Banner (Player Side) */}
         {role === 'PLAYER' && currentStatus === 'PENDING' && (
             <View style={styles.pendingBanner}>
                 <AlertCircle size={20} color="#C2410C" />
@@ -197,9 +270,8 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         )}
 
-        <Text style={styles.sectionTitle}>Session Schedule</Text>
+        <Text style={[styles.sectionTitle, {marginBottom: 12}]}>Session Schedule</Text>
         
-        {/* Sessions List */}
         {sessionList.map((session, index) => {
             const isCompleted = completedDays.includes(session.day_order);
             return (
@@ -231,7 +303,6 @@ export default function ProgramDetailScreen({ navigation, route }) {
         })}
       </ScrollView>
 
-      {/* Footer Actions */}
       <View style={styles.footer}>
         {role === 'PLAYER' && currentStatus === 'PENDING' ? (
              <View style={styles.pendingActions}>
@@ -253,6 +324,47 @@ export default function ProgramDetailScreen({ navigation, route }) {
              </TouchableOpacity>
         )}
       </View>
+
+      {/* ✅ Add/Remove/Redo Modal */}
+      <Modal visible={showAssignModal} animationType="slide" transparent={true}>
+          <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>{isReassigning ? "Redo & Reassign Program" : "Manage Athletes"}</Text>
+                  
+                  <ScrollView style={{maxHeight: 350, width: '100%'}} showsVerticalScrollIndicator={false}>
+                      <Text style={styles.modalSectionTitle}>Squads</Text>
+                      {mySquads.map(sq => (
+                          <TouchableOpacity key={sq.id} style={styles.targetRow} onPress={() => toggleTarget(sq.id)} activeOpacity={0.7}>
+                              <View style={[styles.checkbox, selectedTargets.includes(sq.id) && styles.checkboxActive]}>
+                                  {selectedTargets.includes(sq.id) && <Check size={14} color="#FFF"/>}
+                              </View>
+                              <Text style={styles.targetName}>{sq.name}</Text>
+                          </TouchableOpacity>
+                      ))}
+                      
+                      <Text style={[styles.modalSectionTitle, {marginTop: 16}]}>Athletes</Text>
+                      {myAthletes.map(ath => (
+                          <TouchableOpacity key={ath.id} style={styles.targetRow} onPress={() => toggleTarget(ath.id)} activeOpacity={0.7}>
+                              <View style={[styles.checkbox, selectedTargets.includes(ath.id) && styles.checkboxActive]}>
+                                  {selectedTargets.includes(ath.id) && <Check size={14} color="#FFF"/>}
+                              </View>
+                              <Text style={styles.targetName}>{ath.name}</Text>
+                          </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                  
+                  <View style={styles.modalActions}>
+                      <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowAssignModal(false)}>
+                          <Text style={styles.modalCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveAssignees} disabled={savingAssignees}>
+                          {savingAssignees ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalSaveText}>{isReassigning ? "Duplicate" : "Save"}</Text>}
+                      </TouchableOpacity>
+                  </View>
+              </View>
+          </View>
+      </Modal>
+
     </Container>
   );
 }
@@ -271,8 +383,10 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 13, color: '#64748B', fontWeight: '600' },
 
-  // ✅ New Assignment Styles
   assignmentCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0' },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B' },
+  manageBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  manageBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
   typeBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 16 },
   typeText: { fontWeight: '700', fontSize: 14 },
   athleteList: { gap: 12 },
@@ -288,8 +402,6 @@ const styles = StyleSheet.create({
 
   pendingBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7ED', padding: 16, borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: '#FED7AA' },
   pendingBannerText: { fontSize: 13, fontWeight: '700', color: '#C2410C', flex: 1 },
-
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12 },
   
   sessionCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   completedCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
@@ -313,4 +425,19 @@ const styles = StyleSheet.create({
   acceptText: { color: '#16A34A', fontWeight: '800', fontSize: 16 },
   declineBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FEE2E2', padding: 16, borderRadius: 12 },
   declineText: { color: '#DC2626', fontWeight: '800', fontSize: 16 },
+
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 16, padding: 24 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 8, textAlign: 'center' },
+  modalSectionTitle: { fontSize: 13, fontWeight: '800', color: '#94A3B8', marginBottom: 8, textTransform: 'uppercase' },
+  targetRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#CBD5E1', marginRight: 12, alignItems: 'center', justifyContent: 'center' },
+  checkboxActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  targetName: { fontSize: 15, fontWeight: '600', color: '#334155' },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
+  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#F1F5F9', alignItems: 'center' },
+  modalCancelText: { fontSize: 15, fontWeight: '700', color: '#64748B' },
+  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: 'center' },
+  modalSaveText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
 });

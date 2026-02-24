@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, 
-  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Switch, Image
+  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Switch, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,11 +19,18 @@ export default function MatchDiaryScreen({ navigation, route }) {
   const [editingMatch, setEditingMatch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState('PLAYER');
+
+  // ✅ Form Field Refs for Keyboard Chaining
+  const roundRef = useRef(null);
+  const opponentRef = useRef(null);
+  const tacticsRef = useRef(null);
+  const scoreRef = useRef(null);
+  const reflectionRef = useRef(null);
   
-  // ✅ NEW: Main Search State
+  // Main Search State
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ✅ COACHING STATE
+  // COACHING STATE
   const [myAthletes, setMyAthletes] = useState([]);
   const [selectedAthlete, setSelectedAthlete] = useState(null); 
   const [athleteSearch, setAthleteSearch] = useState('');
@@ -149,7 +156,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
     setAthleteSearch(''); // Reset search
   };
 
-  // ✅ UPDATED: Filter Logic (Tabs + Search)
+  // Filter Logic (Tabs + Search)
   const filteredMatches = matches.filter(m => {
     // 1. Tab Filter
     const isFinished = m.score || (m.result && m.result !== 'Scheduled');
@@ -165,7 +172,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
     return opp.includes(q) || evt.includes(q) || rnd.includes(q);
   });
 
-  // ✅ NEW: Filter Athletes for Modal
+  // Filter Athletes for Modal
   const filteredAthletes = myAthletes.filter(a => 
       a.name.toLowerCase().includes(athleteSearch.toLowerCase())
   );
@@ -219,7 +226,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* ✅ NEW: MAIN SEARCH BAR */}
+      {/* MAIN SEARCH BAR */}
       <View style={styles.searchContainer}>
           <Search size={20} color="#94A3B8" style={{marginRight: 8}} />
           <TextInput 
@@ -279,7 +286,7 @@ export default function MatchDiaryScreen({ navigation, route }) {
             
             <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 50}}>
                 
-                {/* ✅ COACH: PLAYER SELECTOR WITH SEARCH */}
+                {/* COACH: PLAYER SELECTOR WITH SEARCH */}
                 {role === 'COACH' && !editingMatch && (
                     <View style={styles.sectionContainer}>
                         <Text style={styles.sectionHeader}>ASSIGN TO PLAYER</Text>
@@ -321,16 +328,42 @@ export default function MatchDiaryScreen({ navigation, route }) {
                     <Text style={styles.sectionHeader}>MATCH DETAILS</Text>
                     
                     <Text style={styles.label}>Event Name</Text>
-                    <TextInput style={styles.input} value={event} onChangeText={setEvent} placeholder="e.g. Club Championship"/>
+                    <TextInput 
+                        style={styles.input} 
+                        value={event} 
+                        onChangeText={setEvent} 
+                        placeholder="e.g. Club Championship"
+                        returnKeyType="next"
+                        onSubmitEditing={() => roundRef.current?.focus()}
+                        blurOnSubmit={false}    
+                    />
                     
                     <View style={{flexDirection: 'row', gap: 12}}>
                         <View style={{flex: 1}}>
                             <Text style={styles.label}>Round</Text>
-                            <TextInput style={styles.input} value={round} onChangeText={setRound} placeholder="e.g. SF"/>
+                            <TextInput 
+                                ref={roundRef}
+                                style={styles.input} 
+                                value={round} 
+                                onChangeText={setRound} 
+                                placeholder="e.g. SF"
+                                returnKeyType="next"
+                                onSubmitEditing={() => opponentRef.current?.focus()}
+                                blurOnSubmit={false}
+                            />
                         </View>
                         <View style={{flex: 1}}>
                             <Text style={styles.label}>Opponent</Text>
-                            <TextInput style={styles.input} value={opponent} onChangeText={setOpponent} placeholder="Name"/>
+                            <TextInput 
+                                ref={opponentRef}
+                                style={styles.input} 
+                                value={opponent} 
+                                onChangeText={setOpponent} 
+                                placeholder="Name"
+                                returnKeyType="next"
+                                onSubmitEditing={() => tacticsRef.current?.focus()}
+                                blurOnSubmit={false}
+                            />
                         </View>
                     </View>
                 </View>
@@ -342,11 +375,15 @@ export default function MatchDiaryScreen({ navigation, route }) {
                         <Edit3 size={16} color="#0369A1"/>
                     </View>
                     <TextInput 
+                        ref={tacticsRef}
                         style={[styles.input, styles.textArea, {backgroundColor: '#FFF', borderColor: '#E0F2FE'}]} 
                         value={tactics} 
                         onChangeText={setTactics} 
                         multiline 
                         placeholder="Key focus areas, opponent weaknesses..."
+                        returnKeyType="done"
+                        blurOnSubmit={true}
+                        onSubmitEditing={handleSave}
                     />
                 </View>
 
@@ -380,17 +417,30 @@ export default function MatchDiaryScreen({ navigation, route }) {
                                 </View>
                                 <View style={{flex: 1}}>
                                     <Text style={styles.label}>Score</Text>
-                                    <TextInput style={[styles.input, {backgroundColor:'#FFF'}]} value={score} onChangeText={setScore} placeholder="6-4, 6-2"/>
+                                    <TextInput 
+                                        ref={scoreRef}
+                                        style={[styles.input, {backgroundColor:'#FFF'}]} 
+                                        value={score} 
+                                        onChangeText={setScore} 
+                                        placeholder="6-4, 6-2"
+                                        returnKeyType="next"
+                                        onSubmitEditing={() => reflectionRef.current?.focus()}
+                                        blurOnSubmit={false}
+                                    />
                                 </View>
                             </View>
                             
                             <Text style={styles.label}>Reflection</Text>
                             <TextInput 
+                                ref={reflectionRef}
                                 style={[styles.input, styles.textArea, {backgroundColor: '#FFF'}]} 
                                 value={reflection} 
                                 onChangeText={setReflection} 
                                 multiline 
                                 placeholder="Debrief notes..."
+                                returnKeyType="done"
+                                blurOnSubmit={true}
+                                onSubmitEditing={handleSave}
                             />
                         </View>
                     )}
@@ -418,7 +468,6 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   addIconBtn: { padding: 4 },
 
-  // ✅ NEW SEARCH STYLES
   searchContainer: { 
       flexDirection: 'row', 
       alignItems: 'center', 

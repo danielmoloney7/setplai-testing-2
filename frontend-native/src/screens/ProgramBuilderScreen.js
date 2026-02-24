@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TextInput, ScrollView, 
-  TouchableOpacity, Alert, ActivityIndicator, Platform, KeyboardAvoidingView
+  TouchableOpacity, Alert, ActivityIndicator, Platform, KeyboardAvoidingView, Keyboard 
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -56,6 +56,12 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [showDrillConfig, setShowDrillConfig] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [userProfile, setUserProfile] = useState({});
+
+  // ✅ Refs for Form Input Chaining
+  const playersRef = useRef(null);
+  const courtsRef = useRef(null);
+  const durationRef = useRef(null);
+  const reviewDescRef = useRef(null);
 
   useEffect(() => {
     const init = async () => {
@@ -248,14 +254,11 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             status: userRole === 'PLAYER' ? 'ACTIVE' : 'PENDING', 
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
             program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
-            
-            // ✅ Cleaned up squad mapping logic
             squad_id: selectedSquadId || null,
 
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
-                    // Standardize Drill extraction
                     const safeDrillId = item.drill_id || item.drillId || item.id;
                     const realDrill = availableDrills.find(d => d.id === safeDrillId);
                     const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Custom Drill");
@@ -272,8 +275,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             }))
         };
 
-        console.log("Creating Program Payload:", JSON.stringify(payload, null, 2));
-
         await createProgram(payload);
         setLoading(false);
         
@@ -282,8 +283,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                 CommonActions.reset({
                     index: 1,
                     routes: [
-                        { name: 'Main', state: { routes: [{ name: 'Team' }] } }, // The underlying screen
-                        { name: 'SquadDetail', params: { squad: { id: selectedSquadId } } } // The active screen
+                        { name: 'Main', state: { routes: [{ name: 'Team' }] } }, 
+                        { name: 'SquadDetail', params: { squad: { id: selectedSquadId } } } 
                     ],
                 })
             );
@@ -306,10 +307,8 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
   const toggleTarget = (id) => {
     if (squadMode) {
-        // ✅ Enforce Single Selection for Squad Mode
         setSelectedTargets([id]);
     } else {
-        // Multi selection for standard mode
         if (selectedTargets.includes(id)) {
             setSelectedTargets(prev => prev.filter(t => t !== id));
         } else {
@@ -366,18 +365,66 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                ))}
             </ScrollView>
         ) : (
-            <ScrollView>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 40}}>
                 <Text style={styles.headerTitleLarge}>{squadMode ? "Squad Planner" : "AI Generator"}</Text>
+                
                 <Text style={styles.label}>Prompt</Text>
-                <TextInput style={[styles.input, styles.textArea]} multiline textAlignVertical="top" value={prompt} onChangeText={setPrompt} placeholder="Describe the goal..." />
+                <TextInput 
+                    style={[styles.input, styles.textArea]} 
+                    multiline 
+                    textAlignVertical="top" 
+                    value={prompt} 
+                    onChangeText={setPrompt} 
+                    placeholder="Describe the goal..." 
+                    returnKeyType="next"
+                    blurOnSubmit={true} // Important for multiline
+                    onSubmitEditing={() => {
+                        if (squadMode) playersRef.current?.focus();
+                        else durationRef.current?.focus();
+                    }}
+                />
+                
                 {squadMode && (
                     <View style={{flexDirection: 'row', gap: 12}}>
-                        <View style={{flex: 1}}><Text style={styles.label}>Players</Text><TextInput style={styles.input} value={numPlayers} onChangeText={setNumPlayers} keyboardType="numeric"/></View>
-                        <View style={{flex: 1}}><Text style={styles.label}>Courts</Text><TextInput style={styles.input} value={numCourts} onChangeText={setNumCourts} keyboardType="numeric"/></View>
+                        <View style={{flex: 1}}>
+                            <Text style={styles.label}>Players</Text>
+                            <TextInput 
+                                ref={playersRef}
+                                style={styles.input} 
+                                value={numPlayers} 
+                                onChangeText={setNumPlayers} 
+                                keyboardType="numeric"
+                                returnKeyType="next"
+                                onSubmitEditing={() => courtsRef.current?.focus()}
+                                blurOnSubmit={false}
+                            />
+                        </View>
+                        <View style={{flex: 1}}>
+                            <Text style={styles.label}>Courts</Text>
+                            <TextInput 
+                                ref={courtsRef}
+                                style={styles.input} 
+                                value={numCourts} 
+                                onChangeText={setNumCourts} 
+                                keyboardType="numeric"
+                                returnKeyType="next"
+                                onSubmitEditing={() => durationRef.current?.focus()}
+                                blurOnSubmit={false}
+                            />
+                        </View>
                     </View>
                 )}
+                
                 <Text style={styles.label}>Duration (weeks)</Text>
-                <TextInput style={styles.input} value={durationWeeks} onChangeText={setDurationWeeks} keyboardType="numeric"/>
+                <TextInput 
+                    ref={durationRef}
+                    style={styles.input} 
+                    value={durationWeeks} 
+                    onChangeText={setDurationWeeks} 
+                    keyboardType="numeric"
+                    returnKeyType="done"
+                    onSubmitEditing={handleGenerate} // Submit the whole thing on enter!
+                />
             </ScrollView>
         )}
 
@@ -390,7 +437,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   );
 
   const renderStep2_Review = () => (
-    <View style={styles.stepContainer}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.stepContainer}>
       <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: 16}}>
          <Text style={styles.headerTitleLarge}>Review {squadMode ? "Squad Session" : "Program"}</Text>
          {userRole !== 'PLAYER' && creationMethod === 'AI' && (
@@ -402,8 +449,26 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
       <ScrollView contentContainerStyle={{paddingBottom: 100}} showsVerticalScrollIndicator={false}>
          <View style={styles.reviewCard}>
-            <TextInput style={styles.reviewTitle} value={draftProgram.title} editable={userRole !== 'PLAYER'} onChangeText={t => setDraftProgram({...draftProgram, title: t})}/>
-            <TextInput style={styles.reviewDesc} value={draftProgram.description} multiline editable={userRole !== 'PLAYER'} onChangeText={t => setDraftProgram({...draftProgram, description: t})}/>
+            <TextInput 
+                style={styles.reviewTitle} 
+                value={draftProgram.title} 
+                editable={userRole !== 'PLAYER'} 
+                onChangeText={t => setDraftProgram({...draftProgram, title: t})}
+                returnKeyType="next"
+                onSubmitEditing={() => reviewDescRef.current?.focus()}
+                blurOnSubmit={false}
+            />
+            <TextInput 
+                ref={reviewDescRef}
+                style={styles.reviewDesc} 
+                value={draftProgram.description} 
+                multiline 
+                editable={userRole !== 'PLAYER'} 
+                onChangeText={t => setDraftProgram({...draftProgram, description: t})}
+                returnKeyType="done"
+                blurOnSubmit={true}
+                onSubmitEditing={Keyboard.dismiss}
+            />
          </View>
 
          <Text style={styles.sectionLabel}>SESSIONS ({draftProgram.sessions.length})</Text>
@@ -422,7 +487,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                  </View>
                  <View style={styles.drillList}>
                     {s.items?.map((item, dIdx) => {
-                        // ✅ Standardized Drill Parsing
                         const safeDrillId = item.drill_id || item.drillId || item.id;
                         const drillInfo = availableDrills.find(d => d.id === safeDrillId);
                         const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.name || "Custom Drill");
@@ -470,7 +534,6 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
       <View style={styles.footerBtnContainer}>
         <TouchableOpacity style={styles.primaryBtn} disabled={loading} onPress={() => { 
-            // ✅ FORCES Step 3 so Coach explicitly assigns it.
             if (userRole === 'PLAYER') {
                 handleFinalize(['SELF']);
             } else {
@@ -486,7 +549,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             )}
         </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 
   const renderStep3_Assign = () => (

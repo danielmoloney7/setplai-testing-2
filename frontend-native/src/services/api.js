@@ -147,6 +147,16 @@ export const updateProgramStatus = async (programId, status) => {
   }
 };
 
+export const updateProgramAssignees = async (programId, assignedTo) => {
+  try {
+    const response = await api.put(`/programs/${programId}/assignees`, { assigned_to: assignedTo });
+    return response.data;
+  } catch (error) {
+    console.error("Update Assignees Error:", error);
+    throw error;
+  }
+};
+
 export const fetchSessionLogs = async () => {
   try {
     const response = await api.get('/my-session-logs');

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image, Pressable, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Image, Pressable, Animated, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Clock, Dumbbell, Play, Pause, CheckCircle, ThumbsUp, ThumbsDown, Lightbulb, Check, Wand2, AlertCircle, Camera, X } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
@@ -52,7 +52,7 @@ const HoldToEndButton = ({ onComplete }) => {
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       onLongPress={() => {
-        handlePressOut(); // Reset animation instantly
+        handlePressOut(); 
         onComplete();
       }}
       delayLongPress={1000} 
@@ -73,10 +73,14 @@ export default function SessionScreen({ route, navigation }) {
   const [currentSession, setCurrentSession] = useState(initialSession);
   const [showAdaptModal, setShowAdaptModal] = useState(false);
 
-  // States: 'OVERVIEW' -> 'PREP' -> 'COUNTDOWN' -> 'ACTIVE' -> 'FEEDBACK' -> 'SUMMARY'
+  // States: 'OVERVIEW' -> 'PREP' -> 'COUNTDOWN' -> 'ACTIVE' -> 'FEEDBACK' -> 'CHECKLIST' -> 'SUMMARY'
   const [viewState, setViewState] = useState('OVERVIEW');
   const [currentDrillIndex, setCurrentDrillIndex] = useState(0);
   
+  // Checklist State
+  const [checklistData, setChecklistData] = useState({});
+  const [expandedDrillIndex, setExpandedDrillIndex] = useState(null);
+
   // Timer & Countdown
   const [timeLeft, setTimeLeft] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -135,9 +139,8 @@ export default function SessionScreen({ route, navigation }) {
     }
   }, [viewState, countDownValue, currentDuration]);
 
-  // --- ACTIONS ---
-
-  const handleBeginSession = () => {
+  // --- LIVE SESSION ACTIONS ---
+  const handleBeginLiveSession = () => {
     setSessionStartTime(new Date());
     setViewState('PREP');
   };
@@ -150,25 +153,6 @@ export default function SessionScreen({ route, navigation }) {
   const handleFinishDrill = () => {
     setIsTimerRunning(false);
     setViewState('FEEDBACK'); 
-  };
-
-  const takePhoto = async () => {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-          Alert.alert('Permission Required', 'We need camera permissions to snap your victory photo!');
-          return;
-      }
-      
-      let result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [16, 9],
-          quality: 0.5,
-      });
-
-      if (!result.canceled) {
-          setPhotoUri(result.assets[0].uri);
-      }
   };
 
   const completeDrill = (outcome) => {
@@ -214,6 +198,64 @@ export default function SessionScreen({ route, navigation }) {
     setViewState('SUMMARY');
   };
 
+  // --- CHECKLIST ACTIONS ---
+  const handleStartChecklist = () => {
+    setSessionStartTime(new Date());
+    setViewState('CHECKLIST');
+  };
+
+  const handleChecklistSubmit = (idx, item, outcome, val) => {
+    setChecklistData(prev => ({
+        ...prev,
+        [idx]: {
+            drill_id: item.drill_id || item.drillId || item.id || "unknown_drill",
+            outcome: outcome,
+            achieved_value: val !== '' ? parseInt(val, 10) : 0
+        }
+    }));
+    setExpandedDrillIndex(null); 
+  };
+
+  const handleFinishChecklist = () => {
+    const finalLogs = currentSession.items.map((item, idx) => {
+        if (checklistData[idx]) return checklistData[idx];
+        return {
+            drill_id: item.drill_id || item.drillId || item.id || "unknown_drill",
+            outcome: 'skipped',
+            achieved_value: 0
+        };
+    });
+    setDrillLogs(finalLogs);
+    
+    // Check if ended early
+    const isEarly = finalLogs.some(l => l.outcome === 'skipped');
+    if (isEarly) {
+        setNotes(prev => (prev ? "[Ended Prematurely]\n" + prev : "[Ended Prematurely]"));
+    }
+    
+    setViewState('SUMMARY');
+  };
+
+  // --- PHOTO & SAVE ---
+  const takePhoto = async () => {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+          Alert.alert('Permission Required', 'We need camera permissions to snap your victory photo!');
+          return;
+      }
+      
+      let result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [16, 9],
+          quality: 0.5,
+      });
+
+      if (!result.canceled) {
+          setPhotoUri(result.assets[0].uri);
+      }
+  };
+
   const saveSession = async () => {
     setIsUploading(true);
     try {
@@ -255,6 +297,7 @@ export default function SessionScreen({ route, navigation }) {
     } catch (error) {
       console.error("Save Error:", error);
       Alert.alert("Error", "Could not save session.");
+      setIsUploading(false);
     }
   };
 
@@ -307,8 +350,21 @@ export default function SessionScreen({ route, navigation }) {
           </ScrollView>
 
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.exitBtn} onPress={() => navigation.goBack()}><Text style={styles.exitBtnText}>Exit</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.startBtn} onPress={handleBeginSession}><Text style={styles.startBtnText}>Begin Session</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.exitBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.exitBtnText}>Exit</Text>
+            </TouchableOpacity>
+            
+            <View style={{flex: 2, flexDirection: 'row', gap: 8}}>
+                <TouchableOpacity style={[styles.startBtn, {flex: 1, backgroundColor: '#E0F2FE'}]} onPress={handleStartChecklist}>
+                    {/* Safe fallback to CheckCircle */}
+                    <CheckCircle size={18} color={COLORS.primary} />
+                    <Text style={[styles.startBtnText, {color: COLORS.primary, marginLeft: 6, fontSize: 13}]}>Checklist</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.startBtn, {flex: 1.2}]} onPress={handleBeginLiveSession}>
+                    <Play size={18} color="#FFF" />
+                    <Text style={[styles.startBtnText, {marginLeft: 6, fontSize: 14}]}>Live</Text>
+                </TouchableOpacity>
+            </View>
           </View>
 
           <EditSessionModal 
@@ -325,9 +381,134 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 2. PREP VIEW ====================
+  // ==================== 2. CHECKLIST VIEW ====================
+  if (viewState === 'CHECKLIST') {
+    const allCompleted = currentSession.items.length === Object.keys(checklistData).length;
+
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={{flex: 1}}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Checklist Mode</Text>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            {currentSession.items.map((item, idx) => {
+              const isCompleted = !!checklistData[idx];
+              const isExpanded = expandedDrillIndex === idx;
+              
+              const itemDrill = ASSESSMENT_DRILLS.find(d => d.id === (item.drill_id || item.drillId)) || null;
+              const itemScoring = (item.target_value || item.target_prompt)
+                ? { prompt: item.target_prompt || "Target", target: item.target_value }
+                : itemDrill?.scoring;
+              
+              return (
+                <View key={idx} style={[styles.checklistCard, isCompleted && styles.checklistCardDone]}>
+                  <TouchableOpacity 
+                    style={styles.checklistCardHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => {
+                        if (expandedDrillIndex === idx) {
+                            setExpandedDrillIndex(null);
+                        } else {
+                            setExpandedDrillIndex(idx);
+                            setAchievedValue(''); 
+                        }
+                    }}
+                  >
+                    <View style={styles.checklistCardLeft}>
+                      {isCompleted ? <CheckCircle color="#16A34A" size={24} /> : <View style={styles.circleEmpty} />}
+                      <View style={{marginLeft: 12, flex: 1}}>
+                        <Text style={[styles.drillName, isCompleted && {textDecorationLine: 'line-through', color: '#94A3B8'}]}>
+                          {item.drill_name || item.name}
+                        </Text>
+                        <Text style={styles.drillDuration}>{item.duration_minutes || item.targetDurationMin || 0}m</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {isExpanded && !isCompleted && (
+                    <View style={styles.checklistExpanded}>
+                      <Text style={styles.instructionText}>{item.description || itemDrill?.description || "Focus on your form and consistency."}</Text>
+                      {item.notes && <Text style={[styles.coachNoteText, {marginTop: 8}]}>Note: {item.notes}</Text>}
+                      
+                      <View style={[styles.divider, {marginTop: 16, marginBottom: 16}]} />
+                      
+                      {itemScoring ? (
+                        <View style={{marginBottom: 16}}>
+                          <Text style={[styles.numericPrompt, {fontSize: 14}]}>{itemScoring.prompt}</Text>
+                          {itemScoring.target && <Text style={styles.targetLabel}>Target: {itemScoring.target}</Text>}
+                          <TextInput
+                              style={styles.numericInputSmall}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#94A3B8"
+                              onChangeText={setAchievedValue}
+                              value={achievedValue}
+                          />
+                        </View>
+                      ) : (
+                        <Text style={[styles.numericPrompt, {fontSize: 14, marginBottom: 16}]}>How did you perform?</Text>
+                      )}
+
+                      <View style={{flexDirection: 'row', gap: 12}}>
+                        <TouchableOpacity style={[styles.feedbackBtn, {flex: 1, padding: 12, backgroundColor: '#FEE2E2', borderColor: '#FECACA'}]} 
+                          onPress={() => { handleChecklistSubmit(idx, item, 'fail', achievedValue); setAchievedValue(''); }}
+                        >
+                          <ThumbsDown color="#DC2626" size={18} />
+                          <Text style={[styles.feedbackBtnText, {color: '#DC2626', fontSize: 13, marginTop: 4}]}>Struggled</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.feedbackBtn, {flex: 1, padding: 12, backgroundColor: '#DCFCE7', borderColor: '#BBF7D0'}]} 
+                          onPress={() => { handleChecklistSubmit(idx, item, 'success', achievedValue); setAchievedValue(''); }}
+                        >
+                          <ThumbsUp color="#16A34A" size={18} />
+                          <Text style={[styles.feedbackBtnText, {color: '#16A34A', fontSize: 13, marginTop: 4}]}>Nailed It</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {isExpanded && isCompleted && (
+                     <View style={styles.checklistExpanded}>
+                         <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                             <CheckCircle color="#16A34A" size={16} />
+                             <Text style={{color: '#16A34A', fontWeight: '700', fontSize: 14}}>
+                                 {checklistData[idx].outcome === 'success' ? 'Nailed It' : 'Struggled'} 
+                                 {checklistData[idx].achieved_value > 0 ? ` - ${checklistData[idx].achieved_value} reps` : ''}
+                             </Text>
+                         </View>
+                         <TouchableOpacity style={{marginTop: 16, alignSelf: 'flex-start'}} onPress={() => {
+                             const newData = {...checklistData};
+                             delete newData[idx];
+                             setChecklistData(newData);
+                             setAchievedValue('');
+                         }}>
+                             <Text style={{color: '#EF4444', fontWeight: '700', fontSize: 13}}>Undo Completion</Text>
+                         </TouchableOpacity>
+                     </View>
+                  )}
+                </View>
+              )
+            })}
+          </ScrollView>
+
+          <View style={styles.verticalFooter}>
+            {allCompleted ? (
+              <TouchableOpacity style={styles.finishSessionBtn} onPress={handleFinishChecklist}>
+                 <CheckCircle color="#FFF" size={20} />
+                 <Text style={styles.finishSessionBtnText}>Complete Session</Text>
+              </TouchableOpacity>
+            ) : (
+              <HoldToEndButton onComplete={handleFinishChecklist} />
+            )}
+          </View>
+        </SafeAreaView>
+      </View>
+    )
+  }
+
+  // ==================== 3. PREP VIEW (LIVE) ====================
   if (viewState === 'PREP') {
-    // ✅ Logic to determine what media to show
     const getFullUrl = (path) => {
         if (!path) return null;
         if (path.startsWith('http')) return path;
@@ -350,15 +531,10 @@ export default function SessionScreen({ route, navigation }) {
                 </View>
             </View>
 
-            {/* ✅ UPDATED MEDIA BLOCK */}
             <View style={styles.mediaPlaceholder}>
                 {finalMediaUrl ? (
                     isImage ? (
-                        <Image 
-                           source={{ uri: finalMediaUrl }} 
-                           style={{width: '100%', height: '100%', borderRadius: 16}} 
-                           resizeMode="contain"
-                        />
+                        <Image source={{ uri: finalMediaUrl }} style={{width: '100%', height: '100%', borderRadius: 16}} resizeMode="contain" />
                     ) : (
                         <View style={{alignItems: 'center'}}>
                             <Play size={48} color="#FFF" fill="rgba(255,255,255,0.2)" />
@@ -406,7 +582,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 3. COUNTDOWN ====================
+  // ==================== 4. COUNTDOWN (LIVE) ====================
   if (viewState === 'COUNTDOWN') {
     return (
       <View style={styles.countdownContainer}>
@@ -416,7 +592,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 4. ACTIVE DRILL ====================
+  // ==================== 5. ACTIVE DRILL (LIVE) ====================
   if (viewState === 'ACTIVE') {
     return (
       <View style={[styles.container, { backgroundColor: '#0F172A' }]}>
@@ -449,7 +625,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 5. FEEDBACK VIEW ====================
+  // ==================== 6. FEEDBACK VIEW (LIVE) ====================
   if (viewState === 'FEEDBACK') {
     return (
       <View style={[styles.container, { backgroundColor: '#F1F5F9' }]}>
@@ -503,7 +679,7 @@ export default function SessionScreen({ route, navigation }) {
     );
   }
 
-  // ==================== 6. SUMMARY VIEW ====================
+  // ==================== 7. SUMMARY VIEW ====================
   return (
     <View style={styles.container}>
       <SafeAreaView style={{flex: 1}}>
@@ -544,7 +720,7 @@ export default function SessionScreen({ route, navigation }) {
             )}
 
           <TouchableOpacity style={[styles.startBtn, {width: '100%', marginTop: 24}]} onPress={saveSession}>
-            <Text style={styles.startBtnText}>Save & Finish</Text>
+            {isUploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.startBtnText}>Save & Finish</Text>}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -557,6 +733,7 @@ const styles = StyleSheet.create({
   
   // Header
   header: { paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   backText: { fontSize: 16, fontWeight: '600', color: '#334155' },
   iconBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
@@ -569,6 +746,17 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: 14, color: '#64748B', fontWeight: '500' },
 
+  // Checklist Styles
+  checklistCard: { backgroundColor: '#FFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 12, overflow: 'hidden', ...SHADOWS.small },
+  checklistCardDone: { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', opacity: 0.8 },
+  checklistCardHeader: { padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  checklistCardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  circleEmpty: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#CBD5E1' },
+  checklistExpanded: { padding: 16, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#F8FAFC' },
+  numericInputSmall: { backgroundColor: '#FFF', width: '100%', height: 48, borderRadius: 12, fontSize: 20, fontWeight: '800', textAlign: 'center', color: '#0F172A', borderWidth: 1, borderColor: '#E2E8F0' },
+  finishSessionBtn: { backgroundColor: '#16A34A', padding: 16, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, ...SHADOWS.medium },
+  finishSessionBtnText: { color: '#FFF', fontWeight: '800', fontSize: 16 },
+
   // Photo styles
   addPhotoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 20, borderRadius: 12, borderWidth: 2, borderColor: COLORS.primary, borderStyle: 'dashed', backgroundColor: '#F0FDF4' },
   addPhotoText: { color: COLORS.primary, fontWeight: '700', fontSize: 16 },
@@ -576,7 +764,7 @@ const styles = StyleSheet.create({
   photoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
   removePhotoBtn: { position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.6)', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 
-  // Drill List
+  // Drill List (Overview)
   listContainer: { gap: 12 },
   drillCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderWidth: 1, borderColor: '#E2E8F0', ...SHADOWS.small },
   drillLeft: { flex: 1, marginRight: 12 },
@@ -641,32 +829,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   // Hold to End Button
-  holdBtnContainer: {
-    height: 56,
-    backgroundColor: '#FEF2F2',
-    borderRadius: 16,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    width: '100%',
-  },
-  holdBtnFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: '#FECACA',
-  },
-  holdBtnContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  holdBtnText: {
-    color: '#EF4444',
-    fontWeight: '700',
-    fontSize: 16,
-  }
+  holdBtnContainer: { height: 56, backgroundColor: '#FEF2F2', borderRadius: 16, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FECACA', width: '100%' },
+  holdBtnFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#FECACA' },
+  holdBtnContent: { flexDirection: 'row', alignItems: 'center', zIndex: 10 },
+  holdBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 16 }
 });

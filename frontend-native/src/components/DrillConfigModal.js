@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Modal, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, Modal, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image, ActivityIndicator, Alert, Keyboard } from 'react-native';
 import { X, Save, Clock, FileText, PenTool } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import TacticsBoard from './TacticsBoard'; // Import the new Drawing Board
-import { uploadImage } from '../services/api'; // Ensure this matches the function created in Step 3
-import api from '../services/api';
+import api, { uploadImage } from '../services/api'; 
 
 export default function DrillConfigModal({ isOpen, onClose, item, onSave }) {
   const [duration, setDuration] = useState('');
@@ -14,6 +13,9 @@ export default function DrillConfigModal({ isOpen, onClose, item, onSave }) {
   // Drawing Board State
   const [showBoard, setShowBoard] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // ✅ Refs for Input Chaining
+  const notesRef = useRef(null);
 
   useEffect(() => {
     if (item) {
@@ -37,6 +39,7 @@ export default function DrillConfigModal({ isOpen, onClose, item, onSave }) {
   };
 
   const handleSave = () => {
+    Keyboard.dismiss(); // Ensure keyboard drops when manually saved via Enter
     onSave({ 
         ...item, 
         duration: parseInt(duration) || 10, 
@@ -77,6 +80,9 @@ export default function DrillConfigModal({ isOpen, onClose, item, onSave }) {
                             value={duration} 
                             onChangeText={setDuration}
                             keyboardType="numeric"
+                            returnKeyType="next"
+                            blurOnSubmit={false}
+                            onSubmitEditing={() => notesRef.current?.focus()} // ✅ Jump to Notes
                         />
                     </View>
                 </View>
@@ -87,11 +93,15 @@ export default function DrillConfigModal({ isOpen, onClose, item, onSave }) {
                     <View style={[styles.rowInput, {alignItems: 'flex-start'}]}>
                         <FileText size={20} color="#64748B" style={{marginTop: 12}} />
                         <TextInput 
+                            ref={notesRef} // ✅ Attach ref here
                             style={[styles.input, {height: 80, textAlignVertical: 'top'}]} 
                             value={notes} 
                             onChangeText={setNotes}
                             multiline
                             placeholder="Add specific instructions..."
+                            returnKeyType="done"
+                            blurOnSubmit={true} // ✅ Let 'Enter' drop the keyboard
+                            onSubmitEditing={handleSave} // ✅ And immediately trigger save!
                         />
                     </View>
                 </View>

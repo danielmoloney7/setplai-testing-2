@@ -46,6 +46,9 @@ class ProgramCreateSchema(BaseModel):
 class ProgramStatusUpdate(BaseModel):
     status: str 
 
+class ProgramAssigneesUpdate(BaseModel):
+    assigned_to: List[str]
+
 # --- Session Logging Schemas ---
 class DrillPerformanceCreate(BaseModel):
     drill_id: str
@@ -392,6 +395,68 @@ def create_program(
     except Exception as e:
         db.rollback() 
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
+
+@router.put("/programs/{program_id}/assignees")
+def update_program_assignees(
+    program_id: str,
+    data: ProgramAssigneesUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "COACH":
+        raise HTTPException(403, "Only coaches can update assignees.")
+
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(404, "Program not found")
+
+    # 1. Resolve all selected targets (squads and individuals) into unique player IDs
+    final_player_ids = set()
+    for target_id in data.assigned_to:
+        if target_id == "SELF": continue
+        squad_members = db.query(SquadMember).filter(SquadMember.squad_id == target_id).all()
+        if squad_members:
+            for m in squad_members:
+                final_player_ids.add(m.player_id)
+        else:
+            final_player_ids.add(target_id)
+
+    # 2. Get existing active assignments
+    existing_assignments = db.query(ProgramAssignment).filter(
+        ProgramAssignment.program_id == program_id
+    ).all()
+
+    existing_player_ids = {a.player_id for a in existing_assignments}
+
+    players_to_add = final_player_ids - existing_player_ids
+    players_to_remove = existing_player_ids - final_player_ids
+
+    # 3. Add new assignments and notify
+    for pid in players_to_add:
+        new_assignment = ProgramAssignment(
+            program_id=program_id,
+            player_id=pid,
+            coach_id=current_user.id,
+            status="PENDING",
+            assigned_at=datetime.utcnow()
+        )
+        db.add(new_assignment)
+        background_tasks.add_task(
+            create_notification, db, pid, 
+            "New Program Assigned", 
+            f"Coach {current_user.name} added you to a program: {program.title}", 
+            "PROGRAM_ASSIGNED", program.id
+        )
+
+    # 4. Remove old assignments entirely so they drop off the dashboard
+    for pid in players_to_remove:
+        assignment = next((a for a in existing_assignments if a.player_id == pid), None)
+        if assignment:
+            db.delete(assignment)
+
+    db.commit()
+    return {"status": "success", "message": "Assignees updated successfully"}
 
 # ✅ UPDATED: Delete Program -> Soft Delete for Players
 @router.delete("/programs/{program_id}")

@@ -216,17 +216,34 @@ export default function PlansScreen({ navigation }) {
 
       {/* ✅ 3. Tab Switcher */}
       <View style={styles.tabContainer}>
-          {['ACTIVE', 'COMPLETED', 'ARCHIVED'].map(tab => (
-              <TouchableOpacity 
-                key={tab} 
-                style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]} 
-                onPress={() => setActiveTab(tab)}
-              >
-                  <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                      {tab === 'ACTIVE' ? 'Active' : tab === 'COMPLETED' ? 'Done' : 'Archive'}
-                  </Text>
-              </TouchableOpacity>
-          ))}
+          {['ACTIVE', 'COMPLETED', 'ARCHIVED'].map(tab => {
+              let count = 0;
+              let label = '';
+              
+              // Calculate counts dynamically
+              if (tab === 'ACTIVE') { 
+                  count = activePlans.length + pendingPlans.length; 
+                  label = 'Active'; 
+              } else if (tab === 'COMPLETED') { 
+                  count = completedPlans.length; 
+                  label = 'Done'; 
+              } else { 
+                  count = archivedPlans.length; 
+                  label = 'Archive'; 
+              }
+
+              return (
+                  <TouchableOpacity 
+                    key={tab} 
+                    style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]} 
+                    onPress={() => setActiveTab(tab)}
+                  >
+                      <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                          {`${label} (${count})`}
+                      </Text>
+                  </TouchableOpacity>
+              )
+          })}
       </View>
 
       {loading ? (

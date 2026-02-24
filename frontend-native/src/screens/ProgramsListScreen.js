@@ -3,62 +3,73 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Ale
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CheckCircle, Plus, Calendar, XCircle, Archive, RotateCcw } from 'lucide-react-native';
+import { CheckCircle, Plus, Calendar, XCircle, Archive, RotateCcw, Inbox } from 'lucide-react-native'; // ✅ Added Inbox
 import { COLORS, SHADOWS } from '../constants/theme';
-import { fetchPrograms, updateProgramStatus } from '../services/api';
+import { fetchPrograms, fetchSessionLogs, updateProgramStatus } from '../services/api'; // ✅ Added fetchSessionLogs
 
 export default function ProgramsListScreen({ navigation }) {
-  const [role, setRole] = useState('PLAYER');
+  const [role, setRole] = useState('COACH');
   const [programs, setPrograms] = useState([]);
+  const [completedPrograms, setCompletedPrograms] = useState([]); // ✅ Added specific Completed state
   const [archivedPrograms, setArchivedPrograms] = useState([]); 
   const [viewMode, setViewMode] = useState('ACTIVE'); 
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useFocusEffect(useCallback(() => { loadData(); }, []));
-
-  const getDerivedStatus = (item, currentRole) => {
-      let st = (item.status || '').toUpperCase();
-      
-      // If it's explicitly completed or archived, don't override
-      if (st === 'COMPLETED' || st === 'ARCHIVED') return st;
-
-      // For coaches, we derive the status based on player acceptance
-      if (currentRole === 'COACH') {
-          if (item.program_type === 'SQUAD_SESSION') return 'ACTIVE';
-          
-          const assignedList = item.assigned_to || [];
-          const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
-          
-          if (assignedList.length > 0) {
-              if (pendingCount === 0) return 'ACTIVE'; // Everyone accepted
-              if (pendingCount > 0) return 'PENDING'; // Still waiting on someone
-          }
-      }
-      return st;
-  };
-
   const loadData = async (isPullToRefresh = false) => {
-    if (isPullToRefresh) {
-      setIsRefreshing(true);
-  }
-    // setLoading(true);
+    if (isPullToRefresh) setIsRefreshing(true);
     
     try {
         const storedRole = await AsyncStorage.getItem('user_role');
-        const currentRole = storedRole ? storedRole.toUpperCase() : 'PLAYER';
+        const currentRole = storedRole ? storedRole.toUpperCase() : 'COACH';
         setRole(currentRole);
         
-        const dbPrograms = await fetchPrograms(); 
+        // ✅ Fetch both programs AND logs so Coach can auto-detect completed squad sessions
+        const [dbPrograms, dbLogs] = await Promise.all([
+            fetchPrograms(),
+            fetchSessionLogs() 
+        ]);
 
         const active = [];
+        const completed = [];
         const archived = [];
 
         dbPrograms.forEach(p => {
-            const pStatus = (p.status || '').toUpperCase();
-            // Group COMPLETED and ARCHIVED together
-            if (pStatus === 'ARCHIVED' || pStatus === 'COMPLETED') {
+            let pStatus = (p.status || '').toUpperCase();
+            let isFinished = false;
+
+            // ✅ AUTO-DETECT COMPLETED SQUAD SESSIONS
+            if (p.program_type === 'SQUAD_SESSION') {
+                const schedule = p.schedule || [];
+                const totalSessions = new Set(schedule.map(s => s.day_order)).size;
+                const uniqueCompletedSessions = new Set(
+                    dbLogs.filter(l => l.program_id === p.id).map(l => l.session_id)
+                );
+                isFinished = (totalSessions > 0 && uniqueCompletedSessions.size >= totalSessions);
+            }
+
+            if (isFinished && pStatus !== 'ARCHIVED') {
+                pStatus = 'COMPLETED'; // Force status to completed
+            }
+
+            // Derive specific status for player plans
+            if (pStatus !== 'COMPLETED' && pStatus !== 'ARCHIVED' && p.program_type !== 'SQUAD_SESSION') {
+                const assignedList = p.assigned_to || [];
+                const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
+                if (assignedList.length > 0 && pendingCount > 0) {
+                    pStatus = 'PENDING';
+                } else {
+                    pStatus = 'ACTIVE';
+                }
+            }
+
+            p.displayStatus = pStatus; // Store it cleanly for the UI
+
+            // Bucket them properly
+            if (pStatus === 'ARCHIVED') {
                 archived.push(p);
+            } else if (pStatus === 'COMPLETED') {
+                completed.push(p);
             } else {
                 active.push(p);
             }
@@ -66,18 +77,16 @@ export default function ProgramsListScreen({ navigation }) {
 
         // Sort Active: PENDING first, then by Date
         const sortedActive = active.sort((a, b) => {
-            const statusA = getDerivedStatus(a, currentRole);
-            const statusB = getDerivedStatus(b, currentRole);
-
-            if (statusA === 'PENDING' && statusB !== 'PENDING') return -1;
-            if (statusA !== 'PENDING' && statusB === 'PENDING') return 1;
+            if (a.displayStatus === 'PENDING' && b.displayStatus !== 'PENDING') return -1;
+            if (a.displayStatus !== 'PENDING' && b.displayStatus === 'PENDING') return 1;
             return new Date(b.created_at || 0) - new Date(a.created_at || 0);
         });
 
-        // Sort Archived: Newest First
+        const sortedCompleted = completed.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
         const sortedArchived = archived.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
         setPrograms(sortedActive);
+        setCompletedPrograms(sortedCompleted);
         setArchivedPrograms(sortedArchived);
 
     } catch(e) {
@@ -87,24 +96,15 @@ export default function ProgramsListScreen({ navigation }) {
         setIsRefreshing(false);
     }
   };
-  
-  const handleStatusChange = async (id, newStatus) => {
-      try {
-          await updateProgramStatus(id, newStatus);
-          Alert.alert("Success", newStatus === 'ACTIVE' ? "Program Accepted!" : "Program Declined.");
-          loadData(); 
-      } catch (e) {
-          Alert.alert("Error", "Could not update status. Please try again.");
-      }
-  };
+
+  useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const renderItem = ({ item }) => {
     const assignedList = item.assigned_to || [];
     const pendingCount = assignedList.filter(a => a.status === 'PENDING').length;
     const activeCount = assignedList.filter(a => a.status === 'ACTIVE').length;
     
-    // ✅ Use the smart status logic for rendering
-    const displayStatus = getDerivedStatus(item, role);
+    const displayStatus = item.displayStatus;
     const isArchived = displayStatus === 'ARCHIVED' || displayStatus === 'COMPLETED';
 
     return (
@@ -114,26 +114,24 @@ export default function ProgramsListScreen({ navigation }) {
       >
         <View style={styles.cardHeader}>
           <View style={[styles.iconContainer, isArchived && { backgroundColor: '#F1F5F9' }]}>
-              {isArchived ? <Archive size={24} color="#94A3B8" /> : <Calendar size={24} color={COLORS.primary} />}
+              {displayStatus === 'ARCHIVED' ? <Archive size={24} color="#94A3B8" /> : 
+               displayStatus === 'COMPLETED' ? <CheckCircle size={24} color="#64748B" /> : 
+               <Calendar size={24} color={COLORS.primary} />}
           </View>
           <View style={{flex: 1}}>
-              <Text style={[styles.cardTitle, isArchived && { color: '#64748B' }]}>{item.title}</Text>
+              <Text style={[styles.cardTitle, isArchived && { color: '#64748B' }]} numberOfLines={1}>{item.title}</Text>
               
               <Text style={styles.cardSub}>
-                  {role === 'COACH' ? (
-                      item.program_type === 'SQUAD_SESSION' 
+                  {item.program_type === 'SQUAD_SESSION' 
                       ? 'Squad Training' 
                       : (pendingCount > 0 
                           ? <Text style={{color: '#EA580C', fontWeight: 'bold'}}>{pendingCount} Pending Invite(s)</Text> 
                           : `${activeCount} Active Athletes`
                       )
-                  ) : (
-                      item.coach_name || 'Coach'
-                  )}
+                  }
               </Text>
           </View>
           
-          {/* Status Badge */}
           <View style={[styles.badge, 
               displayStatus === 'ACTIVE' ? styles.activeBadge : 
               (displayStatus === 'PENDING' ? styles.pendingBadge : 
@@ -148,26 +146,6 @@ export default function ProgramsListScreen({ navigation }) {
               </Text>
           </View>
         </View>
-
-        {/* Action Buttons (Player Only - Pending) */}
-        {role === 'PLAYER' && displayStatus === 'PENDING' && !isArchived && (
-            <View style={styles.actionsRow}>
-                <TouchableOpacity 
-                    style={[styles.actionBtn, styles.declineBtn]} 
-                    onPress={() => handleStatusChange(item.id, 'DECLINED')}
-                >
-                    <XCircle size={16} color="#B91C1C" />
-                    <Text style={styles.declineText}>Decline</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={[styles.actionBtn, styles.acceptBtn]} 
-                    onPress={() => handleStatusChange(item.id, 'ACTIVE')}
-                >
-                    <CheckCircle size={16} color="#FFF" />
-                    <Text style={styles.acceptText}>Accept</Text>
-                </TouchableOpacity>
-            </View>
-        )}
       </TouchableOpacity>
     );
   };
@@ -175,44 +153,50 @@ export default function ProgramsListScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{role === 'COACH' ? 'Team Programs' : 'My Plans'}</Text>
-        {role === 'COACH' && (
-            <TouchableOpacity onPress={() => navigation.navigate('ProgramBuilder', { squadMode: true })}>
-                <Plus size={28} color={COLORS.primary} />
-            </TouchableOpacity>
-        )}
+        <Text style={styles.headerTitle}>Team Programs</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('ProgramBuilder', { squadMode: true })}>
+            <Plus size={28} color={COLORS.primary} />
+        </TouchableOpacity>
       </View>
 
-      {/* Filter Tabs */}
+      {/* ✅ Tabs exactly matching Plans Screen with Brackets */}
       <View style={styles.filterContainer}>
-          <TouchableOpacity 
-            style={[styles.filterBtn, viewMode === 'ACTIVE' && styles.filterBtnActive]} 
-            onPress={() => setViewMode('ACTIVE')}
-          >
-              <Text style={[styles.filterText, viewMode === 'ACTIVE' && styles.filterTextActive]}>Active ({programs.length})</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.filterBtn, viewMode === 'ARCHIVED' && styles.filterBtnActive]} 
-            onPress={() => setViewMode('ARCHIVED')}
-          >
-              <Text style={[styles.filterText, viewMode === 'ARCHIVED' && styles.filterTextActive]}>Archived ({archivedPrograms.length})</Text>
-          </TouchableOpacity>
+          {['ACTIVE', 'COMPLETED', 'ARCHIVED'].map(mode => {
+              let count = 0;
+              let label = '';
+              
+              if (mode === 'ACTIVE') { count = programs.length; label = 'Active'; }
+              else if (mode === 'COMPLETED') { count = completedPrograms.length; label = 'Done'; }
+              else { count = archivedPrograms.length; label = 'Archived'; }
+
+              return (
+                  <TouchableOpacity 
+                    key={mode}
+                    style={[styles.filterBtn, viewMode === mode && styles.filterBtnActive]} 
+                    onPress={() => setViewMode(mode)}
+                  >
+                      <Text style={[styles.filterText, viewMode === mode && styles.filterTextActive]}>
+                          {`${label} (${count})`}
+                      </Text>
+                  </TouchableOpacity>
+              )
+          })}
       </View>
 
       <FlatList 
-        data={viewMode === 'ACTIVE' ? programs : archivedPrograms} 
+        data={viewMode === 'ACTIVE' ? programs : viewMode === 'COMPLETED' ? completedPrograms : archivedPrograms} 
         keyExtractor={item => item.id.toString()}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 24, paddingBottom: 100 }}
         refreshing={isRefreshing} 
         onRefresh={() => loadData(true)}
-        
-       
-        // refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
         ListEmptyComponent={
             <View style={styles.emptyContainer}>
+                <Inbox size={48} color="#CBD5E1" />
                 <Text style={styles.emptyText}>
-                    {viewMode === 'ACTIVE' ? "No active programs." : "No archived programs."}
+                    {viewMode === 'ACTIVE' ? "No active programs." : 
+                     viewMode === 'COMPLETED' ? "No completed programs." : 
+                     "No archived programs."}
                 </Text>
             </View>
         }
@@ -227,17 +211,18 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
   
   filterContainer: { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  filterBtn: { marginRight: 24, paddingBottom: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  // Reduced margin to fit all 3 tabs cleanly
+  filterBtn: { marginRight: 16, paddingBottom: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   filterBtnActive: { borderBottomColor: COLORS.primary },
   filterText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
   filterTextActive: { color: COLORS.primary, fontWeight: '700' },
 
   card: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, marginBottom: 12, ...SHADOWS.small },
-  archivedCard: { backgroundColor: '#F1F5F9', opacity: 0.8 }, 
+  archivedCard: { backgroundColor: '#F8FAFC', opacity: 0.8 }, 
   
   cardHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   iconContainer: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', width: '90%' },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1, paddingRight: 4 },
   cardSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
   
   badge: { position:'absolute', top:0, right:0, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
@@ -253,13 +238,6 @@ const styles = StyleSheet.create({
   declinedText: { color: '#B91C1C' },
   archivedText: { color: '#475569' },
 
-  actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, borderRadius: 8, gap: 6 },
-  acceptBtn: { backgroundColor: COLORS.primary },
-  declineBtn: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FCA5A5' },
-  acceptText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
-  declineText: { color: '#B91C1C', fontWeight: '700', fontSize: 14 },
-
   emptyContainer: { alignItems: 'center', marginTop: 50 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontStyle: 'italic' }
+  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 }
 });

@@ -47,9 +47,19 @@ export default function SessionLogDetailScreen({ route, navigation }) {
       }
   };
 
-  const toggleLike = () => {
+  // ✅ FIXED: Instantly saves the like to the database
+  const toggleLike = async () => {
       if (role === 'COACH') {
-          setLiked(!liked);
+          const newLikedState = !liked;
+          setLiked(newLikedState); // Optimistic UI update
+          try {
+              // Pass the current feedback so it doesn't get overwritten
+              await submitSessionFeedback(sessionLog.id, feedback, newLikedState);
+          } catch (e) {
+              console.error("Like save error", e);
+              setLiked(!newLikedState); // Revert on failure
+              Alert.alert("Error", "Could not save like.");
+          }
       }
   };
 
@@ -79,8 +89,8 @@ export default function SessionLogDetailScreen({ route, navigation }) {
           <ChevronLeft size={24} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Session Report</Text>
-        <TouchableOpacity onPress={toggleLike} style={styles.likeBtn}>
-            <Heart size={24} color={liked ? '#EF4444' : '#94A3B8'} fill={liked ? '#EF4444' : 'transparent'} />
+        <TouchableOpacity onPress={toggleLike} style={styles.likeBtn} activeOpacity={0.7}>
+            <Heart size={24} color={liked ? '#DB2777' : '#94A3B8'} fill={liked ? '#DB2777' : 'transparent'} />
         </TouchableOpacity>
       </View>
 
@@ -269,7 +279,7 @@ const styles = StyleSheet.create({
 
   feedbackReadBox: { backgroundColor: '#F0F9FF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#BAE6FD', flexDirection: 'row' },
   feedbackText: { flex: 1, fontSize: 14, color: '#0F172A', lineHeight: 20 },
-  likedTag: { flexDirection: 'row', alignItems: 'center', gap: 4, position: 'absolute', top: -10, right: 12, backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
+  likedTag: { flexDirection: 'row', alignItems: 'center', gap: 4, position: 'absolute', top: -10, right: 12, backgroundColor: '#DB2777', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
   likedText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
 
   noteCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row' },
