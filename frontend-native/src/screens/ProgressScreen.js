@@ -2,25 +2,35 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { ClipboardList, ChevronRight } from 'lucide-react-native'; // ✅ Import Icons
+import { ClipboardList, ChevronRight } from 'lucide-react-native'; 
 
-import { fetchMyHistory } from '../services/api';
+import { fetchMyHistory, fetchDrills } from '../services/api';
 import FeedCard from '../components/FeedCard';
-import ProgressChart from '../components/ProgressChart'; 
+import RadarChart from '../components/RadarChart'; 
 import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function ProgressScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [history, setHistory] = useState([]);
+  
+  // Data State
+  const [allHistory, setAllHistory] = useState([]);
+  const [allDrillsList, setAllDrillsList] = useState([]);
+  
+  // Filter State
+  const [timeFilter, setTimeFilter] = useState('W'); // W, M, Y, ALL
 
   const loadData = async (isPullToRefresh = false) => {
     if (isPullToRefresh) setIsRefreshing(true);
-    else if (history.length === 0) setLoading(true);
+    else if (allHistory.length === 0) setLoading(true);
 
     try {
-      const data = await fetchMyHistory();
-      setHistory(data || []);
+      const [logs, allDrills] = await Promise.all([
+          fetchMyHistory(),
+          fetchDrills()
+      ]);
+      setAllHistory(logs || []);
+      setAllDrillsList(allDrills || []);
     } catch (e) {
       console.log(e);
     } finally {
@@ -35,34 +45,108 @@ export default function ProgressScreen({ navigation }) {
     }, [])
   );
 
-  // --- STATS CALCULATIONS ---
-  const totalMinutes = history.reduce((sum, item) => sum + (item.duration_minutes || 0), 0);
-  const weeklyGoal = 5;
-  const consistencyScore = Math.min((history.length / weeklyGoal) * 100, 100);
+  // --- FILTERING LOGIC (NRC Calendar Style) ---
+  const getFilteredLogs = () => {
+      const now = new Date();
+      let startDate;
 
-  // --- HEADER COMPONENT (Stats + Assessment) ---
+      if (timeFilter === 'W') {
+          // Current Week (Starting from the most recent Monday)
+          startDate = new Date(now);
+          const day = startDate.getDay();
+          const distanceToMonday = day === 0 ? 6 : day - 1; 
+          startDate.setDate(now.getDate() - distanceToMonday);
+          startDate.setHours(0, 0, 0, 0);
+
+      } else if (timeFilter === 'M') {
+          // Current Month (From the 1st of the current month)
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          startDate.setHours(0, 0, 0, 0);
+
+      } else if (timeFilter === 'Y') {
+          // Current Year (From January 1st)
+          startDate = new Date(now.getFullYear(), 0, 1);
+          startDate.setHours(0, 0, 0, 0);
+
+      } else {
+          // ALL - Return everything
+          return allHistory;
+      }
+
+      return allHistory.filter(log => {
+          // Handle logs that might be missing date_completed
+          if (!log.date_completed && !log.created_at) return false;
+          
+          const logDate = new Date(log.date_completed || log.created_at);
+          return logDate >= startDate;
+      });
+  };
+
+  const currentLogs = getFilteredLogs();
+
+  // --- STATS CALCULATIONS ---
+  const totalMinutes = currentLogs.reduce((sum, item) => sum + (item.duration_minutes || 0), 0);
+  const hoursPlayed = (totalMinutes / 60).toFixed(1); // e.g. "1.5"
+  
+  // Calculate Radar Chart Data dynamically
+  const getRadarData = () => {
+      let counts = { forehand: 0, backhand: 0, serve: 0, volley: 0, movement: 0 };
+      
+      currentLogs.forEach(log => {
+          (log.drill_performances || []).forEach(perf => {
+              if (perf.outcome === 'skipped') return;
+              
+              const drillInfo = allDrillsList.find(d => d.id === perf.drill_id);
+              const searchString = `${drillInfo?.name || ''} ${drillInfo?.category || ''} ${perf.drill_name || ''}`.toLowerCase();
+
+              if (searchString.includes('forehand')) counts.forehand += 1;
+              if (searchString.includes('backhand')) counts.backhand += 1;
+              if (searchString.includes('serve')) counts.serve += 1;
+              if (searchString.includes('volley') || searchString.includes('net')) counts.volley += 1;
+              if (searchString.includes('movement') || searchString.includes('footwork') || searchString.includes('cardio')) counts.movement += 1;
+          });
+      });
+
+      const maxCount = Math.max(...Object.values(counts), 1);
+
+      const data = [
+          { label: 'Forehand', value: (counts.forehand / maxCount) * 100 },
+          { label: 'Backhand', value: (counts.backhand / maxCount) * 100 },
+          { label: 'Serve', value: (counts.serve / maxCount) * 100 },
+          { label: 'Volleys', value: (counts.volley / maxCount) * 100 },
+          { label: 'Movement', value: (counts.movement / maxCount) * 100 }
+      ];
+
+      if (maxCount === 1 && Object.values(counts).every(v => v === 0)) {
+          return data.map(d => ({...d, value: 0}));
+      }
+      return data;
+  };
+
+  const radarData = getRadarData();
+
+  // --- COMPONENT RENDERING ---
   const renderHeader = () => (
     <View>
         <View style={styles.statsContainer}>
-            {/* Left Side: Chart */}
+            {/* The Radar Chart */}
             <View style={styles.chartCard}>
-                <ProgressChart percentage={consistencyScore} size={100} />
+                <RadarChart data={radarData} />
             </View>
 
-            {/* Right Side: Numeric Stats */}
-            <View style={{ flex: 1, gap: 12 }}>
+            {/* The Numeric KPIs below the chart */}
+            <View style={styles.rowCards}>
                 <View style={styles.statCard}>
-                    <Text style={styles.statValue}>{history.length}</Text>
-                    <Text style={styles.statLabel}>TOTAL SESSIONS</Text>
+                    <Text style={styles.statValue}>{currentLogs.length}</Text>
+                    <Text style={styles.statLabel}>SESSIONS</Text>
                 </View>
                 <View style={styles.statCard}>
-                    <Text style={styles.statValue}>{totalMinutes}</Text>
-                    <Text style={styles.statLabel}>MINUTES TRAINED</Text>
+                    <Text style={styles.statValue}>{hoursPlayed}h</Text>
+                    <Text style={styles.statLabel}>COURT TIME</Text>
                 </View>
             </View>
         </View>
 
-        {/* ✅ PERMANENT ASSESSMENT CARD */}
         <TouchableOpacity 
             style={styles.assessmentCard}
             onPress={() => navigation.navigate('Assessment')}
@@ -79,30 +163,47 @@ export default function ProgressScreen({ navigation }) {
             <ChevronRight size={20} color="#0284C7" />
         </TouchableOpacity>
 
-        <Text style={styles.sectionHeader}>Recent History</Text>
+        <Text style={[styles.sectionHeader, { marginTop: 8 }]}>Filtered History</Text>
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      
+      {/* HEADER WITH TABS */}
       <View style={styles.header}>
         <Text style={styles.title}>Your Progress</Text>
+        
+        {/* NRC Style Time Filter */}
+        <View style={styles.filterRow}>
+            {['W', 'M', 'Y', 'ALL'].map(tab => (
+                <TouchableOpacity 
+                    key={tab} 
+                    style={[styles.filterBtn, timeFilter === tab && styles.filterBtnActive]}
+                    onPress={() => setTimeFilter(tab)}
+                >
+                    <Text style={[styles.filterText, timeFilter === tab && styles.filterTextActive]}>
+                        {tab}
+                    </Text>
+                </TouchableOpacity>
+            ))}
+        </View>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={COLORS.primary} style={{ marginTop: 20 }} />
+        <ActivityIndicator color={COLORS.primary} style={{ marginTop: 40 }} />
       ) : (
         <FlatList
-          data={history}
+          data={currentLogs} // Pass the dynamically filtered logs down here
           keyExtractor={item => item.id}
           renderItem={({ item }) => <FeedCard session={item} />}
           contentContainerStyle={{ paddingBottom: 100 }}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />}
-          ListHeaderComponent={renderHeader} // ✅ Added Header here to scroll with list
+          ListHeaderComponent={renderHeader} 
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No sessions logged yet.</Text>
-                <Text style={styles.emptySub}>Complete a session to see your progress!</Text>
+                <Text style={styles.emptyText}>No sessions found.</Text>
+                <Text style={styles.emptySub}>No activity logged during this period.</Text>
             </View>
           }
         />
@@ -113,27 +214,34 @@ export default function ProgressScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { padding: 24, paddingBottom: 12 },
-  title: { fontSize: 28, fontWeight: '800', color: '#0F172A' },
+  header: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#E2E8F0' },
+  title: { fontSize: 28, fontWeight: '900', color: '#0F172A', marginBottom: 16 },
   
-  statsContainer: { flexDirection: 'row', gap: 12, paddingHorizontal: 24, marginBottom: 24 },
+  // NRC Filter Tabs
+  filterRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 8, padding: 4 },
+  filterBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6 },
+  filterBtnActive: { backgroundColor: '#FFF', ...SHADOWS.small },
+  filterText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  filterTextActive: { color: '#0F172A' },
+
+  statsContainer: { paddingHorizontal: 24, paddingTop: 24, marginBottom: 24, gap: 12 },
   
   chartCard: { 
-    flex: 1.2, 
     backgroundColor: '#FFF', 
     borderRadius: 16, 
     alignItems: 'center', 
     justifyContent: 'center', 
-    padding: 16, 
+    padding: 24, 
     borderWidth: 1, 
     borderColor: '#E2E8F0',
     ...SHADOWS.small
   },
 
+  rowCards: { flexDirection: 'row', gap: 12 },
   statCard: { 
     flex: 1, 
     backgroundColor: '#FFF', 
-    padding: 12, 
+    padding: 16, 
     borderRadius: 16, 
     alignItems: 'center', 
     justifyContent: 'center',
@@ -142,10 +250,9 @@ const styles = StyleSheet.create({
     ...SHADOWS.small
   },
   
-  statValue: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
-  statLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', marginTop: 4, textAlign: 'center' },
+  statValue: { fontSize: 28, fontWeight: '900', color: '#0F172A', letterSpacing: -1 },
+  statLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', marginTop: 2, textAlign: 'center', letterSpacing: 0.5 },
 
-  // ✅ New Styles for Assessment Card
   assessmentCard: {
     backgroundColor: '#F0F9FF', 
     marginHorizontal: 24, 
@@ -169,7 +276,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#0369A1' },
   cardSub: { fontSize: 13, color: '#0284C7' },
 
-  sectionHeader: { fontSize: 18, fontWeight: '700', color: '#334155', paddingHorizontal: 24, marginBottom: 12 },
+  sectionHeader: { fontSize: 18, fontWeight: '800', color: '#334155', paddingHorizontal: 24, marginBottom: 12 },
   
   emptyContainer: { alignItems: 'center', marginTop: 40 },
   emptyText: { color: '#64748B', fontWeight: '700', fontSize: 16 },

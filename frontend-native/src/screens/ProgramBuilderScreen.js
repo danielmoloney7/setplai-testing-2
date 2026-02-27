@@ -46,6 +46,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
 
   const [draftProgram, setDraftProgram] = useState({ title: '', description: '', sessions: [] });
   const [existingPrograms, setExistingPrograms] = useState([]);
+  const [sessionLogs, setSessionLogs] = useState([]); 
   
   const [selectedTargets, setSelectedTargets] = useState(targetIds || []);
 
@@ -57,7 +58,9 @@ export default function ProgramBuilderScreen({ navigation, route }) {
   const [editingItem, setEditingItem] = useState(null);
   const [userProfile, setUserProfile] = useState({});
 
-  // ✅ Refs for Form Input Chaining
+  const [sessionsPerWeek, setSessionsPerWeek] = useState(0)
+
+  // Refs for Form Input Chaining
   const playersRef = useRef(null);
   const courtsRef = useRef(null);
   const durationRef = useRef(null);
@@ -71,18 +74,20 @@ export default function ProgramBuilderScreen({ navigation, route }) {
         if (id) setUserId(id);
 
         try {
-            const [teamData, drillsData, squadsData, profileData, programsData] = await Promise.all([
+            const [teamData, drillsData, squadsData, profileData, programsData, logsData] = await Promise.all([
                 fetchMyTeam(), 
                 fetchDrills(),
                 fetchSquads(),
                 fetchUserProfile(),
-                fetchPrograms()
+                fetchPrograms(),
+                fetchSessionLogs() 
             ]);
             setAthletes(teamData || []);
             setAvailableDrills(drillsData || []);
             setSquads(squadsData || []); 
             setUserProfile(profileData || {}); 
             setExistingPrograms(programsData || []); 
+            setSessionLogs(logsData || []);
         } catch (e) { console.log("Data load error", e); }
     };
     init();
@@ -205,28 +210,38 @@ export default function ProgramBuilderScreen({ navigation, route }) {
     const isSquadSession = squadMode === true;
     const currentProgramType = isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN';
 
-    // Verify target array is correctly utilized
     let finalTargets = targets;
     if (targets.length === 0 && targetIds && targetIds.length > 0) {
         finalTargets = targetIds;
     }
 
-    // Identify if any of the targets is a Squad ID
     const selectedSquadId = finalTargets.find(tId => squads.some(sq => sq.id === tId));
 
     if (selectedSquadId) {
-        // Look through existing programs for conflicts
-        const squadHasActiveProgram = existingPrograms.some(p => 
+        const activeSquadPrograms = existingPrograms.filter(p => 
             p.squad_id === selectedSquadId && 
             p.program_type === currentProgramType && 
             (p.status === 'ACTIVE' || p.status === 'PENDING')
         );
 
-        if (squadHasActiveProgram) {
+        let squadHasUnfinishedProgram = false;
+
+        for (const p of activeSquadPrograms) {
+            const schedule = p.schedule || p.sessions || [];
+            const totalSessions = new Set(schedule.map(s => s.day_order || s.day)).size;
+            const completedSessions = new Set(sessionLogs.filter(l => l.program_id === p.id).map(l => l.session_id)).size;
+
+            if (totalSessions > 0 && completedSessions < totalSessions) {
+                squadHasUnfinishedProgram = true;
+                break;
+            }
+        }
+
+        if (squadHasUnfinishedProgram) {
             const typeName = currentProgramType === "SQUAD_SESSION" ? "Squad Session" : "Player Plan";
             Alert.alert(
                 `Replace Active ${typeName}?`,
-                `This squad currently has an active ${typeName}. Assigning this new one will automatically complete their current one. Do you want to continue?`,
+                `This squad currently has an unfinished ${typeName}. Assigning this new one will override their current progress. Do you want to continue?`,
                 [
                     { text: "Cancel", style: "cancel" },
                     { 
@@ -255,13 +270,16 @@ export default function ProgramBuilderScreen({ navigation, route }) {
             assigned_to: userRole === 'PLAYER' ? ['SELF'] : targets,
             program_type: isSquadSession ? 'SQUAD_SESSION' : 'PLAYER_PLAN',
             squad_id: selectedSquadId || null,
+            sessions_per_week: parseInt(sessionsPerWeek) || null,
 
             sessions: draftProgram.sessions.map((s, i) => ({
                 day: i + 1,
                 drills: (s.items || []).map(item => {
                     const safeDrillId = item.drill_id || item.drillId || item.id;
                     const realDrill = availableDrills.find(d => d.id === safeDrillId);
-                    const prettyName = realDrill ? realDrill.name : (item.drill_name || item.name || "Custom Drill");
+                    
+                    // ✅ FIXED: Look for both snake_case and camelCase names from the AI output
+                    const prettyName = realDrill ? realDrill.name : (item.drill_name || item.drillName || item.name || "Custom Drill");
 
                     return {
                         drill_id: safeDrillId || `custom_${Date.now()}`, 
@@ -423,7 +441,7 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                     onChangeText={setDurationWeeks} 
                     keyboardType="numeric"
                     returnKeyType="done"
-                    onSubmitEditing={handleGenerate} // Submit the whole thing on enter!
+                    onSubmitEditing={handleGenerate} 
                 />
             </ScrollView>
         )}
@@ -469,6 +487,35 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                 blurOnSubmit={true}
                 onSubmitEditing={Keyboard.dismiss}
             />
+            
+            {/* PACING TOGGLE FOR COACHES */}
+            {userRole !== 'PLAYER' && (
+                <View style={{marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderColor: '#E2E8F0'}}>
+                    <Text style={{fontSize: 12, fontWeight: '800', color: '#94A3B8', marginBottom: 12, letterSpacing: 0.5}}>PACING (SESSIONS PER WEEK)</Text>
+                    <View style={{flexDirection: 'row', gap: 8}}>
+                        {[0, 1, 2, 3, 4].map(val => (
+                            <TouchableOpacity 
+                                key={val}
+                                style={{
+                                    flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8,
+                                    backgroundColor: sessionsPerWeek === val ? COLORS.primary : '#F1F5F9',
+                                    borderWidth: 1, borderColor: sessionsPerWeek === val ? COLORS.primary : '#E2E8F0'
+                                }}
+                                onPress={() => setSessionsPerWeek(val)}
+                            >
+                                <Text style={{fontWeight: '700', fontSize: 13, color: sessionsPerWeek === val ? '#FFF' : '#64748B'}}>
+                                    {val === 0 ? 'Any' : val}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                    {sessionsPerWeek > 0 && (
+                        <Text style={{fontSize: 12, color: '#64748B', marginTop: 8, fontStyle: 'italic'}}>
+                            Players will be restricted to completing {sessionsPerWeek} session{sessionsPerWeek > 1 ? 's' : ''} per week.
+                        </Text>
+                    )}
+                </View>
+            )}
          </View>
 
          <Text style={styles.sectionLabel}>SESSIONS ({draftProgram.sessions.length})</Text>
@@ -489,7 +536,10 @@ export default function ProgramBuilderScreen({ navigation, route }) {
                     {s.items?.map((item, dIdx) => {
                         const safeDrillId = item.drill_id || item.drillId || item.id;
                         const drillInfo = availableDrills.find(d => d.id === safeDrillId);
-                        const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.name || "Custom Drill");
+                        
+                        // ✅ FIXED: Look for camelCase drillName from AI as well
+                        const displayName = drillInfo ? drillInfo.name : (item.drill_name || item.drillName || item.name || "Custom Drill");
+                        
                         const displayDuration = item.duration_minutes || item.duration || item.targetDurationMin || 15;
 
                         return (

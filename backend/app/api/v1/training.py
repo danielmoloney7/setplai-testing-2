@@ -42,6 +42,7 @@ class ProgramCreateSchema(BaseModel):
     sessions: List[SessionSchema]
     program_type: str = "PLAYER_PLAN" # 'PLAYER_PLAN' | 'SQUAD_SESSION'
     squad_id: Optional[str] = None
+    sessions_per_week: Optional[int] = None
 
 class ProgramStatusUpdate(BaseModel):
     status: str 
@@ -79,6 +80,7 @@ class SessionLogSchema(SessionLogCreate):
     drill_performances: List[DrillPerformanceSchema] = []
     coach_feedback: Optional[str] = None
     coach_liked: bool = False
+    program_title: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -130,7 +132,7 @@ class DrillCreate(BaseModel):
 
 def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionLogSchema]:
     """
-    Takes raw DB logs, fetches drill names, and returns enriched Pydantic models.
+    Takes raw DB logs, fetches drill names AND program titles, and returns enriched Pydantic models.
     """
     if not logs:
         return []
@@ -142,8 +144,15 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
     # 2. Fallback: Fetch names from the Program Definition (Snapshot)
     program_ids = list(set([log.program_id for log in logs if log.program_id]))
     fallback_map = {}
+    program_title_map = {} # ✅ Store program titles
     
     if program_ids:
+        # Fetch Programs to get their titles
+        programs = db.query(Program).filter(Program.id.in_(program_ids)).all()
+        for p in programs:
+            program_title_map[p.id] = p.title
+
+        # Fetch Sessions to get Drill Fallbacks
         prog_sessions = db.query(ProgramSession).filter(ProgramSession.program_id.in_(program_ids)).all()
         for ps in prog_sessions:
             if ps.drill_id and ps.drill_name:
@@ -153,6 +162,11 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
     results = []
     for log in logs:
         log_model = SessionLogSchema.model_validate(log)
+        
+        # ✅ Inject the program title
+        if log.program_id and log.program_id in program_title_map:
+            log_model.program_title = program_title_map[log.program_id]
+
         for perf in log_model.drill_performances:
             if perf.drill_id in drill_map:
                 perf.drill_name = drill_map[perf.drill_id]
@@ -162,7 +176,6 @@ def enrich_logs_with_names(logs: List[SessionLog], db: Session) -> List[SessionL
                 perf.drill_name = "Custom Drill"
         results.append(log_model)
     return results
-
 # =======================
 # 3. ENDPOINTS
 # =======================
@@ -261,6 +274,7 @@ def get_programs(
                 "created_at": created_at_val,
                 "program_type": getattr(p, "program_type", "PLAYER_PLAN"), 
                 "squad_id": getattr(p, "squad_id", None),
+                "sessions_per_week": getattr(p, "sessions_per_week", None),
                 "assigned_to": assignments_data,
                 "schedule": [
                     {
@@ -295,6 +309,7 @@ def create_program(
             created_at=datetime.utcnow(),
             program_type=program_in.program_type, 
             squad_id=program_in.squad_id,
+            sessions_per_week=program_in.sessions_per_week,
             status=program_in.status if program_in.status else "ACTIVE" # ✅ Set initial status
         )
         db.add(new_program)

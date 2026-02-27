@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Clock, Activity, CheckCircle, XCircle, Trophy, BarChart2, ArrowRight } from 'lucide-react-native';
+import { ChevronLeft, Clock, Activity, CheckCircle, XCircle, Trophy, BarChart2, ArrowRight, Share2 } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { fetchSessionLogs, fetchPrograms } from '../services/api';
+import ShareCardModal from '../components/ShareCardModal';
 
 export default function SessionSummaryScreen({ navigation, route }) {
   // Ensure we have fallbacks if params are missing
@@ -14,7 +15,11 @@ export default function SessionSummaryScreen({ navigation, route }) {
   
   // State for completion
   const [programData, setProgramData] = useState(null);
-  const [isProgramComplete, setIsProgramComplete] = useState(false);
+  
+  // Controls whether we show the special "Finish Program" button
+  const [isNewProgramCompletion, setIsNewProgramCompletion] = useState(false);
+
+  const [showShareModal, setShowShareModal] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -62,9 +67,14 @@ export default function SessionSummaryScreen({ navigation, route }) {
 
             console.log(`📊 Progress: ${completedDays.size}/${requiredDays.size} Sessions Completed.`);
             
-            if (isComplete) {
-                console.log("🎉 PROGRAM COMPLETE!");
-                setIsProgramComplete(true);
+            // ✅ THE FIX: Only trigger the celebration if the program is technically finished 
+            // BUT hasn't actually been marked 'COMPLETED' in the database yet.
+            if (isComplete && matchProgram.status !== 'COMPLETED') {
+                console.log("🎉 NEW PROGRAM COMPLETION DETECTED!");
+                setIsNewProgramCompletion(true);
+            } else {
+                console.log("Program is either unfinished, or was already completed previously.");
+                setIsNewProgramCompletion(false);
             }
         }
 
@@ -76,7 +86,7 @@ export default function SessionSummaryScreen({ navigation, route }) {
   };
 
   const handleContinue = () => {
-      if (isProgramComplete) {
+      if (isNewProgramCompletion) {
           // 🎉 Navigate to Celebration Screen (Replace prevents going back)
           navigation.replace('ProgramComplete', { program: programData });
       } else {
@@ -178,18 +188,38 @@ export default function SessionSummaryScreen({ navigation, route }) {
             );
         })}
 
-        {/* ✅ SMART CONTINUE BUTTON */}
-        <TouchableOpacity 
-            style={[styles.continueBtn, isProgramComplete && styles.completeBtn]} 
-            onPress={handleContinue}
-        >
-            <Text style={styles.continueText}>
-                {isProgramComplete ? "Finish Program" : "Return to Dashboard"}
-            </Text>
-            {isProgramComplete ? <Trophy size={20} color="#FFF" /> : <ArrowRight size={20} color="#FFF" />}
-        </TouchableOpacity>
+        {/* 🔥 FIXED ACTION BUTTONS */}
+        <View style={styles.actionContainer}>
+            <TouchableOpacity 
+                style={styles.shareBtn} 
+                onPress={() => setShowShareModal(true)}
+                activeOpacity={0.8}
+            >
+                <Share2 size={20} color="#0F172A" />
+                <Text style={styles.shareBtnText}>Share to Social</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+                style={[styles.continueBtn, isNewProgramCompletion && styles.completeBtn]} 
+                onPress={handleContinue}
+                activeOpacity={0.9}
+            >
+                <Text style={styles.continueText}>
+                    {isNewProgramCompletion ? "Finish Program" : "Return to Dashboard"}
+                </Text>
+                {isNewProgramCompletion ? <Trophy size={20} color="#FFF" /> : <ArrowRight size={20} color="#FFF" />}
+            </TouchableOpacity>
+        </View>
 
       </ScrollView>
+
+      {/* 🔥 THE MODAL */}
+      <ShareCardModal 
+          visible={showShareModal} 
+          onClose={() => setShowShareModal(false)} 
+          sessionLog={{ ...session, ...logs }} 
+      />
+      
     </SafeAreaView>
   );
 }
@@ -225,16 +255,36 @@ const styles = StyleSheet.create({
     targetBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' },
     targetText: { fontSize: 12, color: '#475569', fontWeight: '600' },
     
-    // Button Styles
-    continueBtn: {
-        marginTop: 24,
-        backgroundColor: '#64748B', // Default Gray
-        paddingVertical: 16,
-        borderRadius: 12,
+    // Action Buttons Container
+    actionContainer: {
+        marginTop: 32,
+        gap: 12,
+    },
+    shareBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: 10,
+        backgroundColor: '#FFF', 
+        paddingVertical: 18,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        ...SHADOWS.small
+    },
+    shareBtnText: {
+        color: '#0F172A',
+        fontSize: 16,
+        fontWeight: '800',
+    },
+    continueBtn: {
+        backgroundColor: '#334155', // Default Gray/Slate
+        paddingVertical: 18,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
         ...SHADOWS.medium
     },
     completeBtn: {
@@ -243,6 +293,6 @@ const styles = StyleSheet.create({
     continueText: {
         color: '#FFF',
         fontSize: 16,
-        fontWeight: '700'
+        fontWeight: '800'
     }
 });

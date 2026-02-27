@@ -6,7 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList, User, Trophy, PenTool, RefreshCw, CheckCircle, Calendar } from 'lucide-react-native';
+import { Plus, Users, Zap, Target, Clock, Dumbbell, Bell, ChevronRight, PlayCircle, ClipboardList, User, Trophy, PenTool, RefreshCw, CheckCircle, Calendar, Check } from 'lucide-react-native';
 
 import { fetchPrograms, fetchSessionLogs, fetchSquads, fetchCoachActivity, fetchUserProfile, fetchDrills, createProgram, fetchNotifications } from '../services/api'; 
 import { generateAIProgram } from '../services/geminiService';
@@ -24,6 +24,7 @@ export default function DashboardScreen({ navigation }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [activePlanCount, setActivePlanCount] = useState(0); 
   const [hasHistory, setHasHistory] = useState(false); 
+  const [weekData, setWeekData] = useState([]); // ✅ Weekly Progress State
   
   // Notification State
   const [unreadCount, setUnreadCount] = useState(0);
@@ -94,19 +95,17 @@ export default function DashboardScreen({ navigation }) {
 
   const onRefresh = () => {
       setRefreshing(true); 
-      loadDashboard();
+      loadDashboard(true);
   };
 
   const loadPlayerDashboard = async (initialUserId) => {
       let currentUserId = initialUserId;
 
-      // 1. Ensure we have a valid User ID from profile if storage was empty
       try {
           const profile = await fetchUserProfile();
           if (profile?.id) {
               currentUserId = profile.id;
               await AsyncStorage.setItem('user_id', profile.id.toString());
-              // Update state so the render logic has the ID
               setUser(prev => ({ ...prev, id: profile.id }));
           }
       } catch(e) { console.log("Profile fetch error in dash", e); }
@@ -118,13 +117,15 @@ export default function DashboardScreen({ navigation }) {
       
       setHasHistory(myLogs.length > 0);
 
+      // ✅ Generate Weekly Progress Data
+      generateWeeklyProgress(myLogs);
+
       const pending = myPrograms.filter(p => (p.status || '').toUpperCase() === 'PENDING');
       setPendingCount(pending.length);
 
       const active = myPrograms.filter(p => (p.status || '').toUpperCase() === 'ACTIVE');
       setActivePlanCount(active.length);
       
-      // ✅ FIX: Pass the confirmed currentUserId explicitly
       calculateNextSessions(active, myLogs, currentUserId);
 
       const unfinishedActivePrograms = active.filter(p => {
@@ -155,6 +156,42 @@ export default function DashboardScreen({ navigation }) {
       if (!foundSuggestion && !suggestedProgram && !isGeneratingSuggestion) {
           generateSuggestion({}, myLogs, currentUserId);
       }
+  };
+
+  // ✅ NEW: Calculate Weekly Progress (Mon - Sun)
+  const generateWeeklyProgress = (logs) => {
+      const today = new Date();
+      const currentDay = today.getDay(); 
+      // Shift so Monday is 0, Sunday is 6
+      const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+      
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - distanceToMonday);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const weekDays = [];
+      const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+      for (let i = 0; i < 7; i++) {
+          const d = new Date(startOfWeek);
+          d.setDate(d.getDate() + i);
+          
+          const hasLog = logs.some(log => {
+              if (!log.date_completed && !log.created_at) return false;
+              const logDate = new Date(log.date_completed || log.created_at);
+              return logDate.getDate() === d.getDate() && 
+                     logDate.getMonth() === d.getMonth() && 
+                     logDate.getFullYear() === d.getFullYear();
+          });
+
+          weekDays.push({
+              dayName: dayNames[i],
+              date: d.getDate(),
+              isToday: d.getDate() === today.getDate() && d.getMonth() === today.getMonth(),
+              completed: hasLog
+          });
+      }
+      setWeekData(weekDays);
   };
 
   const loadCoachDashboard = async () => {
@@ -226,7 +263,6 @@ export default function DashboardScreen({ navigation }) {
       generateSuggestion(profile, logs, user.id);
   };
 
-  // ✅ FIX: Calculate assignment status HERE using the explicit user ID
   const calculateNextSessions = (activePrograms, logs, currentUserId) => {
       if (!activePrograms || activePrograms.length === 0) { setUpNextSessions([]); return; }
       
@@ -245,9 +281,6 @@ export default function DashboardScreen({ navigation }) {
               const sessionDrills = rawSchedule.filter(i => i.day_order === nextDayNum);
               const totalMins = sessionDrills.reduce((sum, d) => sum + (parseInt(d.duration_minutes || d.duration || 0)), 0);
               
-              // ✅ LOGIC: If creator_id exists AND it matches currentUserId -> Player Assigned
-              // If creator_id exists AND it does NOT match -> Coach Assigned
-              // Default to Player Assigned if unsure (avoids frightening "Coach Assigned" label)
               let isCoachAssigned = false;
               if (program.creator_id && currentUserId) {
                   isCoachAssigned = String(program.creator_id) !== String(currentUserId);
@@ -275,26 +308,17 @@ export default function DashboardScreen({ navigation }) {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.grid}>
-        <TouchableOpacity 
-          style={[styles.actionCard, { backgroundColor: COLORS.primary }]}
-          onPress={() => navigation.navigate('CoachAction')} 
-        >
+        <TouchableOpacity style={[styles.actionCard, { backgroundColor: COLORS.primary }]} onPress={() => navigation.navigate('CoachAction')}>
           <Plus color="#FFF" size={32} />
           <Text style={[styles.actionText, { color: '#FFF' }]}>Create Plan</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('MatchList', { viewMode: 'TEAM' })} 
-        >
+        <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('MatchList', { viewMode: 'TEAM' })}>
             <Trophy color="#D97706" size={32} />
             <Text style={styles.actionText}>Team Matches</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.actionCard}
-          onPress={() => navigation.navigate('Team')} 
-        >
+        <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('Team')}>
           <Users color={COLORS.secondary} size={32} />
           <Text style={styles.actionText}>My Team</Text>
         </TouchableOpacity>
@@ -304,11 +328,7 @@ export default function DashboardScreen({ navigation }) {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginHorizontal: -24}} contentContainerStyle={{paddingHorizontal: 24}}>
           {mySquads.length > 0 ? (
               mySquads.map(squad => (
-                <TouchableOpacity 
-                    key={squad.id} 
-                    style={styles.squadCard}
-                    onPress={() => navigation.navigate('SquadDetail', { squad })}
-                >
+                <TouchableOpacity key={squad.id} style={styles.squadCard} onPress={() => navigation.navigate('SquadDetail', { squad })}>
                     <View style={styles.squadIcon}><Text style={styles.squadInitial}>{squad.name[0]}</Text></View>
                     <Text style={styles.squadName}>{squad.name}</Text>
                     <Text style={styles.squadCount}>{squad.member_count} Athletes</Text>
@@ -330,16 +350,11 @@ export default function DashboardScreen({ navigation }) {
                   <View key={item.id}>
                       <View style={{flexDirection:'row', alignItems:'center', marginBottom: 4, marginLeft: 4}}>
                           <Users size={12} color="#64748B" />
-                          <Text style={{fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6}}>
-                              {item.player_name || 'Athlete'}
-                          </Text>
+                          <Text style={{fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6}}>{item.player_name || 'Athlete'}</Text>
                       </View>
 
                       {item.opponent_name ? (
-                          <TouchableOpacity 
-                            style={styles.matchFeedCard}
-                            onPress={() => navigation.navigate('MatchDiary', { userId: item.user_id })} 
-                          >
+                          <TouchableOpacity style={styles.matchFeedCard} onPress={() => navigation.navigate('MatchDiary', { userId: item.user_id })}>
                               <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
                                   <View style={{flex: 1}}>
                                       <Text style={styles.matchEvent}>{item.event_name || 'Match'}</Text>
@@ -379,18 +394,11 @@ export default function DashboardScreen({ navigation }) {
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
             <Text style={styles.sectionTitle}>Tools</Text>
             <View style={styles.grid}>
-                <TouchableOpacity 
-                    style={styles.actionCard} 
-                    onPress={() => navigation.navigate('MatchDiary')}
-                >
+                <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('MatchDiary')}>
                     <Trophy size={28} color="#D97706" />
                     <Text style={styles.actionText}>Match Diary</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity 
-                    style={styles.actionCard} 
-                    onPress={() => navigation.navigate('ProgramBuilder', { squadMode: false })}
-                >
+                <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('ProgramBuilder', { squadMode: false })}>
                     <PenTool size={28} color={COLORS.primary} />
                     <Text style={styles.actionText}>Create Plan</Text>
                 </TouchableOpacity>
@@ -398,10 +406,7 @@ export default function DashboardScreen({ navigation }) {
         </View>
 
         {pendingCount > 0 && (
-            <TouchableOpacity 
-                style={styles.inviteBanner}
-                onPress={() => navigation.navigate('Main', { screen: 'Plans' })} 
-            >
+            <TouchableOpacity style={styles.inviteBanner} onPress={() => navigation.navigate('Main', { screen: 'Plans' })}>
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
                     <View style={styles.notifIcon}><Bell size={20} color="#B45309" /></View>
                     <View>
@@ -414,14 +419,9 @@ export default function DashboardScreen({ navigation }) {
         )}
 
         {!hasHistory && activePlanCount === 0 && (
-            <TouchableOpacity 
-                style={[styles.inviteBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', marginHorizontal: 24, marginBottom: 24 }]}
-                onPress={() => navigation.navigate('Assessment')}
-            >
+            <TouchableOpacity style={[styles.inviteBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', marginHorizontal: 24, marginBottom: 24 }]} onPress={() => navigation.navigate('Assessment')}>
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
-                    <View style={[styles.notifIcon, { backgroundColor: '#E0F2FE' }]}>
-                        <ClipboardList size={20} color="#0284C7" />
-                    </View>
+                    <View style={[styles.notifIcon, { backgroundColor: '#E0F2FE' }]}><ClipboardList size={20} color="#0284C7" /></View>
                     <View>
                         <Text style={[styles.inviteTitle, { color: '#0369A1' }]}>Find Your Baseline</Text>
                         <Text style={[styles.inviteSub, { color: '#0284C7' }]}>Take the 2-min skill assessment.</Text>
@@ -435,10 +435,7 @@ export default function DashboardScreen({ navigation }) {
         <View style={{ paddingHorizontal: 24 }}>
           {(isGeneratingSuggestion || suggestedProgram) && (
               <Animated.View style={[styles.suggestedCard, { transform: [{ scale: bounceAnim }] }]}>
-                  <View style={styles.suggestedBadge}>
-                      <Text style={styles.suggestedBadgeText}>SUGGESTED FOR YOU</Text>
-                  </View>
-                  
+                  <View style={styles.suggestedBadge}><Text style={styles.suggestedBadgeText}>SUGGESTED FOR YOU</Text></View>
                   {isGeneratingSuggestion ? (
                       <View style={{padding: 20, alignItems: 'center'}}>
                           <ActivityIndicator color={COLORS.primary} />
@@ -477,7 +474,6 @@ export default function DashboardScreen({ navigation }) {
                 <View style={styles.upNextHeader}>
                     <View style={styles.tag}><Text style={styles.tagText}>READY</Text></View>
                     
-                    {/* ✅ FIXED: Use the pre-calculated logic */}
                     {sessionItem.isCoachAssigned ? (
                         <View style={[styles.planBadge, { backgroundColor: '#7C3AED' }]}>
                             <Text style={[styles.planBadgeText, { color: '#FFF' }]}>COACH ASSIGNED</Text>
@@ -514,16 +510,12 @@ export default function DashboardScreen({ navigation }) {
         <Text style={styles.sectionHeader}>Quick Start</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll} contentContainerStyle={{paddingHorizontal: 24}}>
           <TouchableOpacity style={styles.quickCard}>
-            <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}>
-              <Zap size={20} color={COLORS.primary} />
-            </View>
+            <View style={[styles.iconBox, { backgroundColor: '#DCFCE7' }]}><Zap size={20} color={COLORS.primary} /></View>
             <Text style={styles.quickTitle}>Serve Power Up</Text>
             <Text style={styles.quickDesc}>30-min session to boost speed.</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.quickCard}>
-              <View style={[styles.iconBox, { backgroundColor: '#E0F2FE' }]}>
-              <Target size={20} color="#0284C7" />
-            </View>
+              <View style={[styles.iconBox, { backgroundColor: '#E0F2FE' }]}><Target size={20} color="#0284C7" /></View>
             <Text style={styles.quickTitle}>Baseline Drill</Text>
             <Text style={styles.quickDesc}>Improve depth & consistency.</Text>
           </TouchableOpacity>
@@ -542,7 +534,6 @@ export default function DashboardScreen({ navigation }) {
                 <Text style={styles.headerSubtitle}>Let's get to work.</Text>
               </View>
               
-              {/* ✅ NEW: Row for Bell + Profile (Both roles see both) */}
               <View style={{flexDirection: 'row', gap: 12}}>
                   <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Notifications')}>
                       <Bell color="#FFF" size={20} />
@@ -553,8 +544,37 @@ export default function DashboardScreen({ navigation }) {
                       <Text style={styles.avatarText}>{getInitials(user.name)}</Text>
                   </TouchableOpacity>
               </View>
-
             </View>
+
+            {/* ✅ NEW STICKY WEEKLY PROGRESS FOR PLAYERS */}
+            {user.role === 'PLAYER' && weekData.length > 0 && (
+                <View style={styles.weeklyStickyContainer}>
+                    <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12}}>
+                        <Text style={styles.weeklyTitle}>This Week</Text>
+                        <Text style={styles.weeklyCount}>
+                            {weekData.filter(d => d.completed).length} Sessions
+                        </Text>
+                    </View>
+                    <View style={styles.weeklyRow}>
+                        {weekData.map((day, idx) => (
+                            <View key={idx} style={styles.dayContainer}>
+                                <View style={[
+                                    styles.dayCircle, 
+                                    day.completed ? styles.dayCircleCompleted : (day.isToday ? styles.dayCircleToday : {})
+                                ]}>
+                                    {day.completed ? (
+                                        <Check size={14} color="#FFF" />
+                                    ) : (
+                                        <Text style={[styles.dayDate, day.isToday && {color: COLORS.primary, fontWeight: '900'}]}>{day.date}</Text>
+                                    )}
+                                </View>
+                                <Text style={[styles.dayName, day.isToday && {color: '#FFF', fontWeight: 'bold'}]}>{day.dayName}</Text>
+                            </View>
+                        ))}
+                    </View>
+                </View>
+            )}
+
           </SafeAreaView>
       </View>
 
@@ -580,6 +600,19 @@ const styles = StyleSheet.create({
   badgeDot: { position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1, borderColor: COLORS.primary },
   avatarBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', ...SHADOWS.small },
   avatarText: { color: COLORS.primary, fontWeight: '800', fontSize: 16 },
+  
+  // ✅ NEW WEEKLY PROGRESS STYLES
+  weeklyStickyContainer: { backgroundColor: 'rgba(255,255,255,0.1)', marginHorizontal: 24, marginTop: 24, padding: 16, borderRadius: 16 },
+  weeklyTitle: { color: '#FFF', fontSize: 14, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  weeklyCount: { color: '#DCFCE7', fontSize: 13, fontWeight: '800' },
+  weeklyRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  dayContainer: { alignItems: 'center' },
+  dayCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  dayCircleCompleted: { backgroundColor: '#10B981' }, // Green for done
+  dayCircleToday: { backgroundColor: '#FFF' }, // White for today
+  dayDate: { fontSize: 13, fontWeight: '600', color: '#FFF' },
+  dayName: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
+
   scrollContent: { paddingVertical: 24, paddingBottom: 100 },
   sectionHeader: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12, marginTop: 8, paddingHorizontal: 24 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 16 },

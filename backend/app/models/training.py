@@ -42,7 +42,7 @@ class Program(Base):
     squad_id = Column(String, nullable=True) # Linked Squad for Coach Programs
     
     status = Column(String(50), default="ACTIVE")
-    
+    sessions_per_week = Column(Integer, nullable=True)
     # Relationships
     sessions = relationship("ProgramSession", back_populates="program")
     creator = relationship("User", back_populates="created_programs")

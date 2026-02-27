@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ChevronLeft, Clock, Activity, Calendar, CheckCircle, XCircle, FileText, User, Heart, MessageSquare, Save, Edit2 } from 'lucide-react-native'; 
+import { ChevronLeft, Clock, Activity, Calendar, CheckCircle, XCircle, FileText, User, Heart, MessageSquare, Save, Edit2, Share2 } from 'lucide-react-native'; 
 import { COLORS, SHADOWS } from '../constants/theme';
 import api, { submitSessionFeedback } from '../services/api';
+import ShareCardModal from '../components/ShareCardModal';
 
 export default function SessionLogDetailScreen({ route, navigation }) {
   const { sessionLog } = route.params;
@@ -15,6 +16,8 @@ export default function SessionLogDetailScreen({ route, navigation }) {
   const [liked, setLiked] = useState(sessionLog.coach_liked || false);
   const [saving, setSaving] = useState(false);
   
+  const [showShareModal, setShowShareModal] = useState(false);
+
   // Control Edit Mode
   // If feedback exists, start closed (false). If empty, start open (true).
   const [isEditing, setIsEditing] = useState(!sessionLog.coach_feedback);
@@ -92,7 +95,18 @@ export default function SessionLogDetailScreen({ route, navigation }) {
         <TouchableOpacity onPress={toggleLike} style={styles.likeBtn} activeOpacity={0.7}>
             <Heart size={24} color={liked ? '#DB2777' : '#94A3B8'} fill={liked ? '#DB2777' : 'transparent'} />
         </TouchableOpacity>
+
+        {/* Group the Share and Like buttons together */}
+        <View style={{flexDirection: 'row', alignItems: 'center', gap: 16}}>
+            <TouchableOpacity onPress={() => setShowShareModal(true)} style={styles.likeBtn} activeOpacity={0.7}>
+                <Share2 size={24} color="#64748B" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={toggleLike} style={styles.likeBtn} activeOpacity={0.7}>
+                <Heart size={24} color={liked ? '#DB2777' : '#94A3B8'} fill={liked ? '#DB2777' : 'transparent'} />
+            </TouchableOpacity>
+        </View>
       </View>
+
 
       <ScrollView 
         contentContainerStyle={styles.content}
@@ -235,6 +249,13 @@ export default function SessionLogDetailScreen({ route, navigation }) {
             )}
         </View>
 
+        {/* 🔥 THE MODAL */}
+      <ShareCardModal 
+          visible={showShareModal} 
+          onClose={() => setShowShareModal(false)} 
+          sessionLog={sessionLog} 
+      />
+    
       </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

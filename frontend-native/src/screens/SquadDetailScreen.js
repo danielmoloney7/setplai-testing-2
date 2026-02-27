@@ -11,9 +11,9 @@ import {
     fetchPlayerLogs, 
     fetchSquadLeaderboard, 
     markSquadAttendance,
-    fetchMyAthletes,      // ✅ Added
-    addMemberToSquad,     // ✅ Added
-    removeMemberFromSquad // ✅ Added
+    fetchMyAthletes,      
+    addMemberToSquad,     
+    removeMemberFromSquad 
 } from '../services/api';
 
 export default function SquadDetailScreen({ navigation, route }) {
@@ -24,12 +24,12 @@ export default function SquadDetailScreen({ navigation, route }) {
   
   // Data State
   const [members, setMembers] = useState([]);
-  const [allAthletes, setAllAthletes] = useState([]); // ✅ Store all coach athletes
+  const [allAthletes, setAllAthletes] = useState([]); 
   const [leaderboard, setLeaderboard] = useState([]);
   
   // Modals State
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [showManageModal, setShowManageModal] = useState(false); // ✅ Manage Squad Modal
+  const [showManageModal, setShowManageModal] = useState(false); 
   const [selectedForAttendance, setSelectedForAttendance] = useState([]);
   const [isSessionLaunch, setIsSessionLaunch] = useState(false); 
 
@@ -55,7 +55,7 @@ export default function SquadDetailScreen({ navigation, route }) {
             fetchSessionLogs(),
             fetchSquadMembers(squad.id),
             lbPromise,
-            fetchMyAthletes() // ✅ Fetch full roster for adding members
+            fetchMyAthletes() 
         ]);
 
         const memberList = squadMembers || [];
@@ -65,7 +65,6 @@ export default function SquadDetailScreen({ navigation, route }) {
         
         setSelectedForAttendance(memberList.map(m => m.id));
 
-        // ... (Existing Program Logic - Kept Same) ...
         const activeSquadProgram = allPrograms
             .filter(p => p.program_type === 'SQUAD_SESSION' && p.squad_id === squad.id && p.status !== 'ARCHIVED')
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
@@ -86,7 +85,13 @@ export default function SquadDetailScreen({ navigation, route }) {
                     const duration = items.reduce((acc, i) => acc + (i.duration_minutes || i.duration || 0), 0);
                     setNextCoachSession({ day_order: nextDay, title: `Session ${nextDay}`, duration, drillCount: items.length, items });
                 }
+            } else {
+                setNextCoachSession(null);
             }
+        } else {
+            setSquadProgram(null);
+            setNextCoachSession(null);
+            setCoachProgress(0);
         }
 
         const activePlayerProgram = allPrograms
@@ -141,7 +146,6 @@ export default function SquadDetailScreen({ navigation, route }) {
   const handleAddMember = async (playerId) => {
       try {
           await addMemberToSquad(squad.id, playerId);
-          // Refresh list locally
           const addedPlayer = allAthletes.find(a => a.id === playerId);
           if (addedPlayer) setMembers(prev => [...prev, addedPlayer]);
           Alert.alert("Success", "Player added to squad.");
@@ -209,7 +213,15 @@ export default function SquadDetailScreen({ navigation, route }) {
 
   const renderOverview = () => (
       <>
-        <Text style={styles.sectionLabel}>SQUAD SESSION (COACH LED)</Text>
+        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
+            <Text style={styles.sectionLabel}>SQUAD SESSION (COACH LED)</Text>
+            {squadProgram && (
+                <TouchableOpacity onPress={() => navigation.navigate('ProgramBuilder', { squadMode: true, targetIds: [squad.id] })}>
+                    <Text style={{fontSize: 12, color: COLORS.primary, fontWeight: '700'}}>+ New Plan</Text>
+                </TouchableOpacity>
+            )}
+        </View>
+
         {squadProgram ? (
             nextCoachSession ? (
                 <View style={styles.upNextCard}>
@@ -231,9 +243,15 @@ export default function SquadDetailScreen({ navigation, route }) {
                     </View>
                 </View>
             ) : (
-                <TouchableOpacity style={styles.completedBanner} disabled>
-                    <Check size={20} color="#FFF" />
-                    <Text style={styles.completedText}>Squad Program Completed</Text>
+                <TouchableOpacity 
+                    style={styles.completedBanner} 
+                    // onPress={() => navigation.navigate('ProgramBuilder', { squadMode: true, targetIds: [squad.id] })}
+                >
+                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                        <Check size={20} color="#FFF" />
+                        <Text style={styles.completedText}>Program Completed</Text>
+                    </View>
+                    {/* <Text style={{color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600', marginTop: 4}}>Tap to create a new one</Text> */}
                 </TouchableOpacity>
             )
         ) : (
@@ -324,7 +342,6 @@ export default function SquadDetailScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><ChevronLeft size={24} color="#0F172A" /></TouchableOpacity>
         <Text style={styles.headerTitle}>Squad Profile</Text>
-        {/* ✅ Edit Button now opens Manage Modal */}
         <TouchableOpacity style={styles.iconBtn} onPress={() => setShowManageModal(true)}>
             <Edit2 size={20} color="#64748B"/>
         </TouchableOpacity>
@@ -347,7 +364,7 @@ export default function SquadDetailScreen({ navigation, route }) {
         {activeTab === 'OVERVIEW' ? renderOverview() : renderLeaderboard()}
       </ScrollView>
 
-      {/* ✅ MEMBER MANAGEMENT MODAL */}
+      {/* MEMBER MANAGEMENT MODAL */}
       <Modal visible={showManageModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -477,10 +494,13 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { fontSize: 12, color: '#64748B' },
   playBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  
   createBanner: { backgroundColor: COLORS.primary, borderRadius: 12, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 24 },
   createText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  completedBanner: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 24 },
-  completedText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  
+  completedBanner: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24, ...SHADOWS.small },
+  completedText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  
   statsGrid: { flexDirection: 'row', gap: 16, marginBottom: 32 },
   statCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 20, alignItems: 'center', ...SHADOWS.small },
   bigPercent: { fontSize: 36, fontWeight: '800', marginBottom: 4 },

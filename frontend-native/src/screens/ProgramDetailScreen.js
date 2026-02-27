@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2, User, Edit2, RotateCcw } from 'lucide-react-native';
+import { Calendar, Users, Clock, CheckCircle, ChevronLeft, XCircle, AlertCircle, Check, Trash2, User, Edit2, RotateCcw, Lock } from 'lucide-react-native';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { fetchSessionLogs, updateProgramStatus, deleteProgram, updateProgramAssignees, createProgram, fetchMyAthletes, fetchSquads } from '../services/api';
 
@@ -24,6 +24,14 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   // Check if program is fully done or archived
   const isCompletedOrArchived = currentStatus === 'COMPLETED' || currentStatus === 'ARCHIVED' || program?.displayStatus === 'COMPLETED' || program?.displayStatus === 'ARCHIVED';
+
+  // ✅ PACING LOGIC SETUP
+  const pacing = program?.sessions_per_week || 0;
+  const programStartDate = new Date(program?.created_at || Date.now());
+  const now = new Date();
+  // Calculate how many weeks have passed since creation
+  const daysElapsed = Math.floor((now - programStartDate) / (1000 * 60 * 60 * 24));
+  const currentWeek = Math.floor(daysElapsed / 7) + 1; 
 
   useFocusEffect(
     useCallback(() => {
@@ -58,17 +66,15 @@ export default function ProgramDetailScreen({ navigation, route }) {
 
   if (!program) return null;
 
-  // ✅ Open Modal to Manage Athletes
   const openManageAthletes = () => {
       setIsReassigning(false);
       setSelectedTargets(program.assigned_to?.map(a => a.id) || []);
       setShowAssignModal(true);
   };
 
-  // ✅ Open Modal to Redo & Duplicate
   const openRedoReassign = () => {
       setIsReassigning(true);
-      setSelectedTargets(program.assigned_to?.map(a => a.id) || []); // Pre-select previous players
+      setSelectedTargets(program.assigned_to?.map(a => a.id) || []); 
       setShowAssignModal(true);
   };
 
@@ -80,12 +86,10 @@ export default function ProgramDetailScreen({ navigation, route }) {
       }
   };
 
-  // ✅ Handle the actual saving/duplicating logic
   const handleSaveAssignees = async () => {
       setSavingAssignees(true);
       try {
           if (isReassigning) {
-              // 1. Group the flat schedule array back into Days
               const grouped = {};
               (program.schedule || []).forEach(s => {
                   if (!grouped[s.day_order]) grouped[s.day_order] = [];
@@ -103,27 +107,26 @@ export default function ProgramDetailScreen({ navigation, route }) {
                   drills: grouped[day]
               }));
 
-              // 2. Create the exact duplicate schema
               const programData = {
-                  title: program.title, // Keeps the same title
+                  title: program.title, 
                   description: program.description,
                   status: "ACTIVE",
                   assigned_to: selectedTargets,
                   program_type: program.program_type || "PLAYER_PLAN",
                   squad_id: program.squad_id,
+                  sessions_per_week: program.sessions_per_week, // Preserve pacing
                   sessions: sessionsPayload
               };
 
               await createProgram(programData);
               Alert.alert("Success", "Program duplicated and reassigned to Active successfully!");
               setShowAssignModal(false);
-              navigation.navigate('Main', { screen: 'Programs' }); // Force return to list to refresh
+              navigation.navigate('Main', { screen: 'Programs' }); 
           } else {
-              // Standard assignment update
               await updateProgramAssignees(program.id, selectedTargets);
               Alert.alert("Success", "Assignees updated successfully!");
               setShowAssignModal(false);
-              navigation.goBack(); // Trigger refresh on previous screen
+              navigation.goBack(); 
           }
       } catch (e) {
           console.error("Save assignees error", e);
@@ -216,7 +219,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         </View>
 
-        {/* ✅ COACH ONLY: Assignment Details with Smart Buttons */}
+        {/* COACH ONLY: Assignment Details with Smart Buttons */}
         {role === 'COACH' && (
             <View style={styles.assignmentCard}>
                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
@@ -270,31 +273,54 @@ export default function ProgramDetailScreen({ navigation, route }) {
             </View>
         )}
 
+        {/* PACING WARNING */}
+        {role === 'PLAYER' && pacing > 0 && (
+            <Text style={{fontSize: 13, color: '#64748B', marginBottom: 12, fontStyle: 'italic', paddingHorizontal: 4}}>
+                Coach has restricted you to {pacing} session{pacing > 1 ? 's' : ''} per week. You are currently in Week {currentWeek}.
+            </Text>
+        )}
         <Text style={[styles.sectionTitle, {marginBottom: 12}]}>Session Schedule</Text>
         
         {sessionList.map((session, index) => {
             const isCompleted = completedDays.includes(session.day_order);
+            
+            // ✅ THE LOGIC: Does this day require a future week?
+            const requiredWeek = pacing > 0 ? Math.ceil(session.day_order / pacing) : 1;
+            const isTimeLocked = pacing > 0 && currentWeek < requiredWeek && !isCompleted;
+
             return (
                 <TouchableOpacity 
                     key={index} 
-                    style={[styles.sessionCard, isCompleted && styles.completedCard]}
-                    disabled={role === 'PLAYER' && currentStatus === 'PENDING'}
+                    style={[
+                        styles.sessionCard, 
+                        isCompleted && styles.completedCard,
+                        isTimeLocked && { opacity: 0.5, backgroundColor: '#F8FAFC' } // Grey out locked sessions
+                    ]}
+                    // Disabled if pending, OR if locked by pacing
+                    disabled={(role === 'PLAYER' && currentStatus === 'PENDING') || isTimeLocked}
                     onPress={() => {
                         const targetScreen = isCompleted ? 'SessionSummary' : 'Session';
                         navigation.navigate(targetScreen, { session: session, programId: program.id });
                     }}
                 >
                     <View style={styles.sessionHeader}>
-                        <View style={[styles.dayBadge, isCompleted && styles.completedBadge]}>
-                            {isCompleted ? <CheckCircle size={14} color="#16A34A" /> : <Text style={styles.dayText}>Day {session.day_order}</Text>}
+                        <View style={[styles.dayBadge, isCompleted && styles.completedBadge, isTimeLocked && {backgroundColor: '#E2E8F0'}]}>
+                            {isCompleted ? <CheckCircle size={14} color="#16A34A" /> : <Text style={[styles.dayText, isTimeLocked && {color: '#64748B'}]}>Day {session.day_order}</Text>}
                         </View>
                         <View>
                             <Text style={styles.sessionName}>{session.title}</Text>
                             <Text style={styles.drillCount}>{session.items.length} Drills</Text>
                         </View>
                     </View>
+                    
+                    {/* ✅ DYNAMIC RIGHT TAG */}
                     {isCompleted ? (
                         <View style={styles.doneTag}><Text style={styles.doneTagText}>Done</Text></View>
+                    ) : isTimeLocked ? (
+                        <View style={{flexDirection:'row', alignItems:'center', gap: 4}}>
+                            <Lock size={12} color="#94A3B8" />
+                            <Text style={{color: '#94A3B8', fontSize: 11, fontWeight: '700'}}>Week {requiredWeek}</Text>
+                        </View>
                     ) : (
                         <View style={styles.drillTag}><Clock size={12} color={COLORS.primary} /><Text style={styles.drillTagText}>{session.totalMinutes} min</Text></View>
                     )}
@@ -325,7 +351,7 @@ export default function ProgramDetailScreen({ navigation, route }) {
         )}
       </View>
 
-      {/* ✅ Add/Remove/Redo Modal */}
+      {/* Add/Remove/Redo Modal */}
       <Modal visible={showAssignModal} animationType="slide" transparent={true}>
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>

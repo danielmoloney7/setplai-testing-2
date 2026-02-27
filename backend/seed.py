@@ -1,6 +1,6 @@
 from app.core.database import SessionLocal, engine, Base
 from app.models.user import User, Squad, SquadMember
-from app.models.training import Drill, Program, ProgramSession, ProgramAssignment
+from app.models.training import Drill, Program, ProgramSession, ProgramAssignment, SessionLog, DrillPerformance
 from app.models.technique import ProVideo, UserVideo, Analysis
 from app.core.security import get_password_hash
 import datetime
@@ -91,12 +91,56 @@ def seed_data():
         drill_name="Cross-Court Attack Strategy",
         duration_minutes=20,
         notes="Look at the attached diagram. Move the opponent off the court!",
-        # ✅ Here is a sample URL testing the image rendering logic we built!
         media_url="https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?q=80&w=800&auto=format&fit=crop" 
     )
     db.add(squad_session)
     db.commit()
     print("   ✅ Squad Session with Diagram added.")
+
+    # --- HISTORICAL SESSION LOGS FOR PROGRESS SCREEN TESTING ---
+    # Using timezone-aware UTC directly
+    now = datetime.datetime.now(datetime.UTC)
+    last_week_date = now - datetime.timedelta(days=8) # Past the 7-day 'W' window
+    this_week_date = now - datetime.timedelta(days=1) # Inside the 'W' window
+
+    # Log 1: Last Week
+    log1 = SessionLog(
+        id="log_1",
+        player_id="user_rafa",
+        program_id="prog_squad_1",
+        session_id=1,
+        duration_minutes=45,
+        rpe=7,
+        notes="Felt great on my serves today.",
+        date_completed=last_week_date
+    )
+    db.add(log1)
+    db.commit()
+
+    perf1 = DrillPerformance(id="perf_1", session_log_id="log_1", drill_id="d1", outcome="success", achieved_value=8)
+    perf2 = DrillPerformance(id="perf_2", session_log_id="log_1", drill_id="d2", outcome="success", achieved_value=6)
+    db.add_all([perf1, perf2])
+
+    # Log 2: This Week
+    log2 = SessionLog(
+        id="log_2",
+        player_id="user_rafa",
+        program_id="prog_squad_1",
+        session_id=2,
+        duration_minutes=60,
+        rpe=8,
+        notes="Tough cardio and movement.",
+        date_completed=this_week_date
+    )
+    db.add(log2)
+    db.commit()
+
+    perf3 = DrillPerformance(id="perf_3", session_log_id="log_2", drill_id="d3", outcome="success", achieved_value=15)
+    perf4 = DrillPerformance(id="perf_4", session_log_id="log_2", drill_id="custom_movement", outcome="success", achieved_value=0)
+    db.add_all([perf3, perf4])
+    db.commit()
+
+    print("   ✅ Historical Session Logs added for testing W/M/Y/All filters.")
 
     # --- PRO TECHNIQUE LIBRARY ---
     pro_videos = [
