@@ -1,0 +1,5 @@
+bucket = "setplai-terraform-state"
+key =  "terraform.tfstate"
+region = "eu-west-1"
+dynamodb_table = "setplai-terraform-locks"
+encrypt = true
