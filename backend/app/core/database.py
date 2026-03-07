@@ -1,13 +1,18 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
 # The Connection String: "mysql+driver://user:password@host/dbname"
 # SQLALCHEMY_DATABASE_URL = "mysql+mysqlconnector://root:secret@127.0.0.1:3306/setplai_db"
-SQLALCHEMY_DATABASE_URL = "sqlite:///./setplai_db.db"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./setplai_db.db")
+
 # 1. Create the engine
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
+if SQLALCHEMY_DATABASE_URL.endswith("sqlite"):
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
 # 2. Create a SessionLocal class (we use this to talk to the DB)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
