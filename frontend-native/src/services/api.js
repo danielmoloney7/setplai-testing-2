@@ -6,7 +6,7 @@ import { Platform } from 'react-native'; // ✅ Import Platform
 // Use localhost for Web, and your LAN IP for Mobile
 const API_URL = Platform.OS === 'web' 
   ? 'http://127.0.0.1:8000/api/v1' 
-  : 'http://192.168.0.15:8000/api/v1'; // Ensure this IP is correct for your PC
+  : 'http://192.168.0.18:8000/api/v1'; // Your PC's LAN IP — update if it changes
 
 const api = axios.create({
   baseURL: API_URL,

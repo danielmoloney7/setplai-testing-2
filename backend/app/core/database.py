@@ -1,25 +1,38 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
+import boto3
+from dotenv import load_dotenv
 
-# The Connection String: "mysql+driver://user:password@host/dbname"
-# SQLALCHEMY_DATABASE_URL = "mysql+mysqlconnector://root:secret@127.0.0.1:3306/setplai_db"
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./setplai_db.db")
+load_dotenv()
 
-# 1. Create the engine
-if SQLALCHEMY_DATABASE_URL.endswith("sqlite"):
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-    )
-else:
+ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
+DB_HOST = os.getenv("DB_HOST")
+
+def get_db_password():
+    secret_name = f"setplai/{ENVIRONMENT}/db_password"
+    try:
+        client = boto3.client('secretsmanager', region_name="eu-west-1")
+        secret = client.get_secret_value(SecretId=secret_name)
+        return secret['SecretString']
+    except Exception as e:
+        print(f"Could not fetch secret from AWS: {e}")
+        return None
+
+if ENVIRONMENT != "local" and DB_HOST:
+    DB_PASSWORD = get_db_password()
+    SQLALCHEMY_DATABASE_URL = f"postgresql://setplai_admin:{DB_PASSWORD}@{DB_HOST}/postgres"
     engine = create_engine(SQLALCHEMY_DATABASE_URL)
-# 2. Create a SessionLocal class (we use this to talk to the DB)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+else:
+    SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./setplai_db.db")
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+    else:
+        engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
-# 3. Create the Base class (all your models will inherit from this)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 4. Dependency (used in API routes later)
 def get_db():
     db = SessionLocal()
     try:

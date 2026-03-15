@@ -131,6 +131,7 @@ export default function ProgressScreen({ navigation }) {
         <View style={styles.statsContainer}>
             {/* The Radar Chart */}
             <View style={styles.chartCard}>
+                <Text style={styles.chartTitle}>Skill Focus</Text>
                 <RadarChart data={radarData} />
             </View>
 
@@ -226,15 +227,26 @@ const styles = StyleSheet.create({
 
   statsContainer: { paddingHorizontal: 24, paddingTop: 24, marginBottom: 24, gap: 12 },
   
-  chartCard: { 
-    backgroundColor: '#FFF', 
-    borderRadius: 16, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    padding: 24, 
-    borderWidth: 1, 
+  chartCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 24,
+    borderWidth: 1,
     borderColor: '#E2E8F0',
     ...SHADOWS.small
+  },
+  chartTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#94A3B8',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
 
   rowCards: { flexDirection: 'row', gap: 12 },

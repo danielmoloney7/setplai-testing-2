@@ -6,7 +6,7 @@ resource "random_password" "db_password" {
 
 # 2. Cretae a "Vault" in AWS Secrets Manager
 resource "aws_secretsmanager_secret" "db_secret" {
-  name                    = "setplai/prod/db_password"
+  name                    = "setplai/${var.env}/db_password"
   recovery_window_in_days = 0 # Froces immediate deletion if we ever destroy
 }
 
@@ -14,5 +14,21 @@ resource "aws_secretsmanager_secret" "db_secret" {
 resource "aws_secretsmanager_secret_version" "db_secret_val" {
   secret_id     = aws_secretsmanager_secret.db_secret.id
   secret_string = random_password.db_password.result
+}
+
+# JWT signing secret
+resource "random_password" "jwt_secret" {
+  length  = 64
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "jwt_secret" {
+  name                    = "setplai/${var.env}/jwt_secret"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "jwt_secret_val" {
+  secret_id     = aws_secretsmanager_secret.jwt_secret.id
+  secret_string = random_password.jwt_secret.result
 }
 

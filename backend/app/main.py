@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter, HTTPException
 from app.core.database import engine, Base
 from app.api.v1 import auth, training, squads, matches, notifications  # <--- IMPORT TRAINING ROUTER here
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +11,8 @@ from app.api.v1 import technique # <--- IMPORT NEW ROUTER
 from app.models import technique as technique_models
 
 import os
+import boto3
+import uuid
 
 # Create all tables in the database
 Base.metadata.create_all(bind=engine)
@@ -51,3 +53,32 @@ def list_routes():
         if hasattr(route, "path"):
             print(f"📍 {route.path}")
     print("------------------------\n")
+    
+@app.get("/api/v1/media/upload-url")
+def get_presigned_url(file_type: str = "video/mp4"):
+
+    BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
+    try:
+        ext = file_type.split('/')[-1]
+        unique_filename = f"{uuid.uuid4()}.{ext}"
+
+        s3_client = boto3.client("s3", region_name = "eu-west-1")
+
+        presigned_url = s3_client.generate_presigned_url(
+            "put_object",
+            Params = {
+                "Bucket": BUCKET_NAME,
+                "Key": unique_filename,
+                "ContentType": file_type
+            },
+            ExpiresIn = 3600
+        )
+        
+        return {
+            "upload_url": presigned_url,
+            "file_path": f"/{unique_filename}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code = 500, detail = str(e))

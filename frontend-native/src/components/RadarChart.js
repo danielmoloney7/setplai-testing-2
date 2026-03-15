@@ -8,14 +8,15 @@ const { width } = Dimensions.get('window');
 export default function RadarChart({ data, size }) {
   if (!data || data.length === 0) return null;
 
-  // Use the provided size, or dynamically stretch to fit the screen width (minus card padding)
-  const canvasSize = size || (width - 90); 
+  // statsContainer paddingHorizontal (24×2=48) + chartCard padding (24×2=48) = 96px total
+  const canvasSize = size || (width - 96);
   const center = canvasSize / 2;
-  
-  // 🔥 THE FIX: We reserve exactly 50 pixels of space on all sides for the text labels.
-  // This means the web stays massive, but the text is 100% protected from iOS clipping.
-  const textMargin = 50; 
-  const radius = (canvasSize / 2) - textMargin; 
+
+  // Reserve enough space for the longest label ("MOVEMENT"/"BACKHAND") at font-size 11
+  // on diagonal axes with textAnchor start/end — 72px prevents SVG viewport overflow on
+  // all current iPhone sizes (SE 375px → Pro Max 430px).
+  const textMargin = 72;
+  const radius = (canvasSize / 2) - textMargin;
   const angleStep = (Math.PI * 2) / data.length;
 
   const renderWeb = () => {
@@ -73,8 +74,8 @@ export default function RadarChart({ data, size }) {
   };
 
   const renderLabels = () => {
-    // Push the text exactly 16 pixels away from the outer ring of the web
-    const labelRadius = radius + 16; 
+    // Push the text 12px outside the outer ring of the web
+    const labelRadius = radius + 12;
     return data.map((d, i) => {
       const x = center + labelRadius * Math.cos(i * angleStep - Math.PI / 2);
       const y = center + labelRadius * Math.sin(i * angleStep - Math.PI / 2);

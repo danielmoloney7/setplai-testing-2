@@ -75,6 +75,6 @@ def login_for_access_token(
         "access_token": access_token, 
         "token_type": "bearer",
         "role": user.role,
-        "name": user.email.split("@")[0],
+        "name": user.name,
         "id": user.id
     }
